@@ -30,6 +30,9 @@ with st.sidebar:
     )
     st.write(f"OAuth secret: {SETTINGS.client_secret_file}")
     st.write(f"OAuth token: {SETTINGS.token_file}")
+    st.write(f"Auth mode: {SETTINGS.google_auth_mode}")
+    if SETTINGS.google_auth_mode == "service_account":
+        st.write(f"Service account file: {SETTINGS.service_account_file}")
     st.write(f"Cache TTL: {SETTINGS.cache_ttl_seconds}s")
 
 
@@ -39,6 +42,9 @@ def load_data(sheet_source: str) -> tuple[dict[str, pd.DataFrame], str]:
         sheet_input=sheet_source,
         client_secret_file=SETTINGS.client_secret_file,
         token_file=SETTINGS.token_file,
+        auth_mode=SETTINGS.google_auth_mode,
+        service_account_file=SETTINGS.service_account_file,
+        service_account_json=SETTINGS.service_account_json,
     )
 
 

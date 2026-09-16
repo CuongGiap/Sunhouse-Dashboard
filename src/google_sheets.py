@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 import pandas as pd
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
@@ -60,6 +62,36 @@ def load_oauth_credentials(client_secret_file: str, token_file: str) -> Credenti
     return creds
 
 
+def load_service_account_credentials(
+    service_account_file: str,
+    service_account_json: str,
+) -> ServiceAccountCredentials:
+    raw_json = (service_account_json or "").strip()
+    if raw_json:
+        try:
+            service_info = json.loads(raw_json.replace("\\n", "\n"))
+        except json.JSONDecodeError as exc:
+            raise GoogleSheetError(
+                "GOOGLE_SERVICE_ACCOUNT_JSON không phải JSON hợp lệ."
+            ) from exc
+        return ServiceAccountCredentials.from_service_account_info(
+            service_info,
+            scopes=SCOPES,
+        )
+
+    service_account_path = Path(service_account_file)
+    if not service_account_path.exists():
+        raise GoogleSheetError(
+            "Không tìm thấy service account credentials. "
+            "Hãy cấu hình GOOGLE_SERVICE_ACCOUNT_FILE hoặc GOOGLE_SERVICE_ACCOUNT_JSON."
+        )
+
+    return ServiceAccountCredentials.from_service_account_file(
+        str(service_account_path),
+        scopes=SCOPES,
+    )
+
+
 def _values_to_dataframe(values: list[list[Any]]) -> pd.DataFrame:
     if not values:
         return pd.DataFrame()
@@ -93,9 +125,20 @@ def fetch_spreadsheet_data(
     sheet_input: str,
     client_secret_file: str,
     token_file: str,
+    auth_mode: str = "oauth",
+    service_account_file: str = "",
+    service_account_json: str = "",
 ) -> tuple[dict[str, pd.DataFrame], str]:
     spreadsheet_id = parse_spreadsheet_id(sheet_input)
-    creds = load_oauth_credentials(client_secret_file, token_file)
+    normalized_mode = (auth_mode or "oauth").strip().lower()
+
+    if normalized_mode == "service_account":
+        creds = load_service_account_credentials(
+            service_account_file=service_account_file,
+            service_account_json=service_account_json,
+        )
+    else:
+        creds = load_oauth_credentials(client_secret_file, token_file)
 
     service = build("sheets", "v4", credentials=creds)
     metadata = (

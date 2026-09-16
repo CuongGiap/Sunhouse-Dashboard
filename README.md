@@ -1,52 +1,76 @@
 # Google Sheets Dashboard
 
-Ung dung Streamlit de doc du lieu tu mot Google Sheet (nhieu tabs) va hien thi dashboard tong quan.
+Ung dung Streamlit de doc du lieu tu Google Sheets (nhieu tab) va hien thi dashboard tong quan.
 
-## 1. Cai dat
+## Chay local
 
 ```powershell
 cd D:\Work\Sunhouse\Dashboard
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-## 2. Tao OAuth credentials (1 lan)
-
-1. Mo Google Cloud Console.
-2. Tao project moi (hoac dung project san co).
-3. Bat Google Sheets API.
-4. Vao APIs & Services > Credentials > Create Credentials > OAuth client ID.
-5. Chon Application type: Desktop app.
-6. Tai file JSON ve va dat ten `credentials.json` trong thu muc goc Dashboard.
-
-## 3. Cau hinh bien moi truong
-
-```powershell
 Copy-Item .env.example .env
-```
-
-Co the sua lai `GOOGLE_SPREADSHEET` trong `.env` thanh URL hoac ID cua file can doc.
-
-## 4. Chay app
-
-```powershell
 streamlit run Home.py
 ```
 
-Lan dau nhan nut **Ket noi va tai du lieu**, trinh duyet se mo trang dang nhap Google:
-- Dang nhap bang tai khoan da co quyen voi Google Sheet.
-- Chap nhan quyen truy cap read-only.
-- Sau khi xong, file `token.json` duoc tao local de tai su dung.
+Lan dau bam nut Ket noi va tai du lieu, trinh duyet se mo de dang nhap Google OAuth (neu dung che do oauth).
 
-## 5. Bao mat
+## Cac che do xac thuc
 
-- `credentials.json` va `token.json` da duoc bo qua trong `.gitignore`.
-- Khong commit 2 file nay len git.
-- Neu doi tai khoan hoac thu hoi quyen, xoa `token.json` va login lai.
+App ho tro 2 che do:
 
-## 6. Ghi chu
+1. `oauth` (mac dinh): dung `credentials.json` + `token.json`, phu hop local.
+2. `service_account`: phu hop deploy cloud, khong can login tren browser.
 
-- App hien tai doc toan bo tabs trong file va cho phep preview tung tab.
-- Dung cache theo `CACHE_TTL_SECONDS` (mac dinh 300 giay).
-- Neu tab co dong header khong nam o dong 1, can bo sung buoc mapping rieng o phien ban tiep theo.
+### Bien moi truong
+
+Xem mau day du trong `.env.example`:
+
+- `GOOGLE_AUTH_MODE=oauth|service_account`
+- `GOOGLE_CLIENT_SECRET_FILE`
+- `GOOGLE_TOKEN_FILE`
+- `GOOGLE_SERVICE_ACCOUNT_FILE`
+- `GOOGLE_SERVICE_ACCOUNT_JSON`
+- `GOOGLE_SPREADSHEET`
+- `CACHE_TTL_SECONDS`
+
+## Deploy len Streamlit Community Cloud (khuyen nghi)
+
+1. Push code len GitHub repo nay.
+2. Tao Service Account trong Google Cloud Console.
+3. Bat Google Sheets API cho project.
+4. Share file Google Sheet cho email cua Service Account voi quyen Viewer.
+5. Trong Streamlit Cloud:
+   - Main file path: `Home.py`
+   - Python dependencies: tu `requirements.txt`
+   - Them secrets/environment:
+     - `GOOGLE_AUTH_MODE=service_account`
+     - `GOOGLE_SPREADSHEET=<url-hoac-id-sheet>`
+     - `GOOGLE_SERVICE_ACCOUNT_JSON=<json-service-account-day-du>`
+6. Deploy app.
+
+Goi y: neu nhap JSON tren cloud, giu nguyen toan bo chuoi JSON (gom private_key).
+
+## Deploy len Render
+
+Repo da co san file `render.yaml`.
+
+1. Tao Web Service tren Render tu GitHub repo.
+2. Render tu doc `render.yaml` va start command.
+3. Them environment variables tren Render:
+   - `GOOGLE_AUTH_MODE=service_account`
+   - `GOOGLE_SPREADSHEET=<url-hoac-id-sheet>`
+   - `GOOGLE_SERVICE_ACCOUNT_JSON=<json-service-account-day-du>`
+4. Redeploy.
+
+## Bao mat
+
+Cac file nhay cam da duoc ignore:
+
+- `.env`
+- `credentials.json`
+- `token.json`
+- `client_secret_*.json`
+- `*.apps.googleusercontent.com.json`
+
+Khong commit service account JSON vao repo.
