@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import json
 import os
 from dataclasses import dataclass
@@ -21,7 +22,10 @@ def _read_streamlit_secret(key: str) -> str:
         if value is None:
             return ""
 
-        if isinstance(value, (dict, list)):
+        if isinstance(value, Mapping):
+            return json.dumps(value)
+
+        if isinstance(value, list):
             return json.dumps(value)
 
         return str(value)
