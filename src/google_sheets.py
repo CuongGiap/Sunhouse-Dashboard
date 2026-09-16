@@ -69,11 +69,16 @@ def load_service_account_credentials(
     raw_json = (service_account_json or "").strip()
     if raw_json:
         try:
-            service_info = json.loads(raw_json.replace("\\n", "\n"))
+            service_info = json.loads(raw_json)
         except json.JSONDecodeError as exc:
             raise GoogleSheetError(
                 "GOOGLE_SERVICE_ACCOUNT_JSON không phải JSON hợp lệ."
             ) from exc
+
+        private_key = service_info.get("private_key")
+        if isinstance(private_key, str):
+            service_info["private_key"] = private_key.replace("\\n", "\n")
+
         return ServiceAccountCredentials.from_service_account_info(
             service_info,
             scopes=SCOPES,
