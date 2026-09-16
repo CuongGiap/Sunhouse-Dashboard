@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -34,6 +35,15 @@ with st.sidebar:
     if SETTINGS.google_auth_mode == "service_account":
         st.write(f"Service account file: {SETTINGS.service_account_file}")
     st.write(f"Cache TTL: {SETTINGS.cache_ttl_seconds}s")
+
+if SETTINGS.google_auth_mode == "service_account":
+    has_inline_secret = bool(SETTINGS.service_account_json.strip())
+    has_secret_file = Path(SETTINGS.service_account_file).exists()
+    if not has_inline_secret and not has_secret_file:
+        st.warning(
+            "Chưa có thông tin Service Account. "
+            "Hãy cấu hình GOOGLE_SERVICE_ACCOUNT_JSON trong Secrets trên Streamlit Cloud."
+        )
 
 
 @st.cache_data(ttl=SETTINGS.cache_ttl_seconds)
@@ -119,8 +129,8 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
             color="Số cột",
             title="Số dòng dữ liệu theo từng tab",
         )
-        st.plotly_chart(chart, use_container_width=True)
-        st.dataframe(stats, use_container_width=True)
+        st.plotly_chart(chart, width="stretch")
+        st.dataframe(stats, width="stretch")
     else:
         st.info("Google Sheet không có dữ liệu để hiển thị.")
 
@@ -134,7 +144,7 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
     c4.metric("Số dòng", len(filtered_df))
     c5.metric("Số cột", len(filtered_df.columns))
 
-    st.dataframe(filtered_df, use_container_width=True, height=500)
+    st.dataframe(filtered_df, width="stretch", height=500)
 
 
 col_load, col_refresh = st.columns([2, 1])

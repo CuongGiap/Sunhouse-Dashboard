@@ -74,3 +74,25 @@ Cac file nhay cam da duoc ignore:
 - `*.apps.googleusercontent.com.json`
 
 Khong commit service account JSON vao repo.
+
+## Checklist xu ly loi sau deploy (Streamlit Cloud)
+
+1. Loi 403 PERMISSION_DENIED:
+   - Kiem tra da share Google Sheet cho email service account chua.
+   - Quyen toi thieu: Viewer.
+
+2. Loi khong tim thay service account credentials:
+   - Kiem tra Secrets da co `GOOGLE_AUTH_MODE=service_account`.
+   - Kiem tra `GOOGLE_SERVICE_ACCOUNT_JSON` da dan day du JSON.
+
+3. Loi parse JSON:
+   - Dan nguyen van JSON 1 dong hoac dung mau trong `.streamlit/secrets.example.toml`.
+   - Khong bo mat ky tu `\\n` trong `private_key`.
+
+4. App chay nhung khong co du lieu:
+   - Kiem tra `GOOGLE_SPREADSHEET` dung URL/ID.
+   - Bam nut `Tai lai (bo cache)` de refresh du lieu.
+
+5. Doi file service account hoac doi quyen sheet:
+   - Cap nhat lai Secrets tren Streamlit Cloud.
+   - Bam Reboot app tu trang quan ly app.
