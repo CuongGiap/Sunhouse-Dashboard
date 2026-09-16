@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,13 @@ def _read_streamlit_secret(key: str) -> str:
         import streamlit as st
 
         value = st.secrets.get(key)
-        return "" if value is None else str(value)
+        if value is None:
+            return ""
+
+        if isinstance(value, (dict, list)):
+            return json.dumps(value)
+
+        return str(value)
     except Exception:
         return ""
 
