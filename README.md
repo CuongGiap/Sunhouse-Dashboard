@@ -40,16 +40,16 @@ Xem mau day du trong `.env.example`:
 2. Tao Service Account trong Google Cloud Console.
 3. Bat Google Sheets API cho project.
 4. Share file Google Sheet cho email cua Service Account voi quyen Viewer.
-5. Trong Streamlit Cloud:
-   - Main file path: `Home.py`
-   - Python dependencies: tu `requirements.txt`
-   - Them secrets/environment:
-     - `GOOGLE_AUTH_MODE=service_account`
-     - `GOOGLE_SPREADSHEET=<url-hoac-id-sheet>`
-     - `GOOGLE_SERVICE_ACCOUNT_JSON=<json-service-account-day-du>`
-6. Deploy app.
+5. Vao Streamlit Community Cloud va chon New app.
+6. Chon repo `CuongGiap/Sunhouse-Dashboard`, branch `main`, main file path `Home.py`.
+7. Mo Advanced settings > Secrets, dan noi dung theo mau trong `.streamlit/secrets.example.toml`.
+8. Sua lai 2 gia tri bat buoc trong Secrets:
+   - `GOOGLE_SPREADSHEET`
+   - `GOOGLE_SERVICE_ACCOUNT_JSON`
+9. Bam Deploy app.
 
 Goi y: neu nhap JSON tren cloud, giu nguyen toan bo chuoi JSON (gom private_key).
+App da duoc cap nhat de doc ca environment variables va Streamlit secrets.
 
 ## Deploy len Render
 
