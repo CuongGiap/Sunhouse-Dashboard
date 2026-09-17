@@ -171,6 +171,20 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
     return month_value.dt.strftime("%m/%Y")
 
 
+def _find_msp_column(df: pd.DataFrame) -> str | None:
+    normalized_map = {col: _normalize_text(col) for col in df.columns}
+
+    for col, normalized in normalized_map.items():
+        if normalized == "msp" or normalized.startswith("msp"):
+            return col
+
+    for col, normalized in normalized_map.items():
+        if "msp" in normalized:
+            return col
+
+    return None
+
+
 def _render_time_summary_for_sheet(
     source_df: pd.DataFrame,
     filtered_df: pd.DataFrame,
@@ -186,8 +200,13 @@ def _render_time_summary_for_sheet(
         st.info("Không có dữ liệu sau khi filter để tổng hợp theo thời gian.")
         return
 
+    msp_col = _find_msp_column(source_df)
+    if msp_col is None:
+        st.warning("Không tìm thấy cột MSP trong sheet đang chọn.")
+        return
+
     selected_rows = source_df.loc[filtered_df.index].copy()
-    time_label = _extract_month_label(selected_rows.iloc[:, 0])
+    time_label = _extract_month_label(selected_rows[msp_col])
 
     summary = (
         pd.DataFrame({"Thời gian": time_label})
@@ -199,7 +218,7 @@ def _render_time_summary_for_sheet(
 
     if summary.empty:
         st.info(
-            "Không tách được thời gian từ cột A của sheet đã chọn. "
+            "Không tách được thời gian từ cột MSP của sheet đã chọn. "
             "Định dạng hỗ trợ: yymmdd... hoặc dd/mm."
         )
         return
@@ -209,7 +228,7 @@ def _render_time_summary_for_sheet(
     )
     summary = summary.sort_values("_sort_date").drop(columns=["_sort_date"])
 
-    st.caption(f"Sheet: {sheet_name}")
+    st.caption(f"Sheet: {sheet_name} | Cột MSP: {msp_col}")
     st.markdown("**Bảng 2 cột: Thời gian và Số lượng**")
     st.dataframe(summary, width="stretch")
 
@@ -233,14 +252,18 @@ def _render_time_summary_for_all_sheets(tabs_data: dict[str, pd.DataFrame]) -> N
         if df.empty or len(df.columns) == 0:
             continue
 
-        part = pd.DataFrame({"Thời gian": _extract_month_label(df.iloc[:, 0])})
+        msp_col = _find_msp_column(df)
+        if msp_col is None:
+            continue
+
+        part = pd.DataFrame({"Thời gian": _extract_month_label(df[msp_col])})
         part = part.dropna(subset=["Thời gian"]).copy()
         if not part.empty:
             parts.append(part)
 
     if not parts:
         st.info(
-            "Không tách được thời gian từ cột A ở các sheet. "
+            "Không tách được thời gian từ cột MSP ở các sheet. "
             "Định dạng hỗ trợ: yymmdd... hoặc dd/mm."
         )
         return
@@ -285,7 +308,11 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         st.warning("Không tìm thấy cột Lý do trong tab ĐỔI SHOPEE.")
         return
 
-    first_col = df.columns[0]
+    msp_col = _find_msp_column(df)
+    if msp_col is None:
+        st.warning("Không tìm thấy cột MSP trong tab ĐỔI SHOPEE.")
+        return
+
     working = df.copy()
     working["_reason_raw"] = working[reason_col].fillna("").astype(str)
 
@@ -336,12 +363,12 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         st.info("Không có dữ liệu khớp với các nhóm Lý do đã chọn.")
         return
 
-    working["Tháng"] = _extract_month_label(working[first_col])
+    working["Tháng"] = _extract_month_label(working[msp_col])
     working = working[working["Tháng"].notna()].copy()
 
     if working.empty:
         st.warning(
-            "Không tách được tháng từ cột A. "
+            "Không tách được tháng từ cột MSP. "
             "Hỗ trợ định dạng 6 số đầu kiểu yymmdd (260901...) hoặc ngày dd/mm."
         )
         return
