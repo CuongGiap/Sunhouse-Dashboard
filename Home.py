@@ -158,6 +158,16 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
         yyyymmdd_prefix, format="%Y%m%d", errors="coerce"
     )
 
+    yyyymm = raw.str.extract(r"^(\d{4})(\d{2})$", expand=True)
+    if not yyyymm.empty:
+        parsed_yyyymm = pd.to_datetime(
+            yyyymm[0] + "-" + yyyymm[1] + "-01",
+            format="%Y-%m-%d",
+            errors="coerce",
+        )
+    else:
+        parsed_yyyymm = pd.Series(pd.NaT, index=raw.index)
+
     ddmm = raw.str.extract(r"^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?")
     if not ddmm.empty:
         day = ddmm[0].str.zfill(2)
@@ -188,13 +198,26 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
     else:
         parsed_yyyymmdd_sep = pd.Series(pd.NaT, index=raw.index)
 
+    excel_serial = pd.to_numeric(raw, errors="coerce")
+    parsed_excel_serial = pd.to_datetime(
+        excel_serial,
+        unit="D",
+        origin="1899-12-30",
+        errors="coerce",
+    )
+
     generic_parsed = pd.to_datetime(raw, errors="coerce", dayfirst=True)
 
     month_value = month_from_code
     month_value = month_value.fillna(month_from_yyyymmdd)
+    month_value = month_value.fillna(parsed_yyyymm)
     month_value = month_value.fillna(parsed_ddmm)
     month_value = month_value.fillna(parsed_yyyymmdd_sep)
+    month_value = month_value.fillna(parsed_excel_serial)
     month_value = month_value.fillna(generic_parsed)
+
+    valid_year = month_value.dt.year.between(2000, 2100, inclusive="both")
+    month_value = month_value.where(valid_year)
     return month_value.dt.strftime("%m/%Y")
 
 
@@ -225,7 +248,10 @@ def _guess_time_column(df: pd.DataFrame) -> str | None:
 
     scored: list[tuple[str, float]] = []
     for col in df.columns:
-        score = _time_parse_success_rate(df[col])
+        labels = _extract_month_label(df[col])
+        parse_rate = float(labels.notna().mean()) if len(labels) else 0.0
+        unique_months = int(labels.dropna().nunique())
+        score = parse_rate + min(unique_months / 100.0, 0.05)
         normalized = _normalize_text(col)
         if "ngay" in normalized or "date" in normalized or "thang" in normalized:
             score += 0.02
@@ -577,6 +603,7 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
         "Cột dùng để tách Thời gian/Số lượng",
         options=time_col_options,
         index=default_idx,
+        key=f"time_col_for_{selected_sheet}",
         help="Sẽ lấy 6 ký tự đầu (yymmdd...) hoặc dạng dd/mm để quy đổi ra tháng.",
     )
 
