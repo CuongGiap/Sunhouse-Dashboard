@@ -153,7 +153,12 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
     yymmdd_prefix = raw.str.extract(r"^(\d{6})", expand=False)
     month_from_code = pd.to_datetime(yymmdd_prefix, format="%y%m%d", errors="coerce")
 
-    ddmm = raw.str.extract(r"^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$")
+    yyyymmdd_prefix = raw.str.extract(r"^(\d{8})", expand=False)
+    month_from_yyyymmdd = pd.to_datetime(
+        yyyymmdd_prefix, format="%Y%m%d", errors="coerce"
+    )
+
+    ddmm = raw.str.extract(r"^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?")
     if not ddmm.empty:
         day = ddmm[0].str.zfill(2)
         month = ddmm[1].str.zfill(2)
@@ -167,7 +172,29 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
     else:
         parsed_ddmm = pd.Series(pd.NaT, index=raw.index)
 
-    month_value = month_from_code.fillna(parsed_ddmm)
+    yyyymmdd_with_sep = raw.str.extract(
+        r"^(\d{4})[/-](\d{1,2})[/-](\d{1,2})", expand=True
+    )
+    if not yyyymmdd_with_sep.empty:
+        parsed_yyyymmdd_sep = pd.to_datetime(
+            yyyymmdd_with_sep[0]
+            + "-"
+            + yyyymmdd_with_sep[1].str.zfill(2)
+            + "-"
+            + yyyymmdd_with_sep[2].str.zfill(2),
+            format="%Y-%m-%d",
+            errors="coerce",
+        )
+    else:
+        parsed_yyyymmdd_sep = pd.Series(pd.NaT, index=raw.index)
+
+    generic_parsed = pd.to_datetime(raw, errors="coerce", dayfirst=True)
+
+    month_value = month_from_code
+    month_value = month_value.fillna(month_from_yyyymmdd)
+    month_value = month_value.fillna(parsed_ddmm)
+    month_value = month_value.fillna(parsed_yyyymmdd_sep)
+    month_value = month_value.fillna(generic_parsed)
     return month_value.dt.strftime("%m/%Y")
 
 
@@ -196,18 +223,19 @@ def _guess_time_column(df: pd.DataFrame) -> str | None:
     if df.empty or len(df.columns) == 0:
         return None
 
-    msp_col = _find_msp_column(df)
-    if msp_col:
-        return msp_col
-
     scored: list[tuple[str, float]] = []
     for col in df.columns:
         score = _time_parse_success_rate(df[col])
+        normalized = _normalize_text(col)
+        if "ngay" in normalized or "date" in normalized or "thang" in normalized:
+            score += 0.02
+        elif "msp" in normalized:
+            score += 0.01
         scored.append((col, score))
 
     scored.sort(key=lambda item: item[1], reverse=True)
     best_col, best_score = scored[0]
-    if best_score <= 0:
+    if best_score <= 0.01:
         return None
 
     return best_col
@@ -235,6 +263,18 @@ def _render_time_summary_for_sheet(
 
     selected_rows = source_df.loc[filtered_df.index].copy()
     time_label = _extract_month_label(selected_rows[time_col])
+
+    if time_label.notna().sum() == 0:
+        fallback_col = _guess_time_column(selected_rows)
+        if fallback_col and fallback_col != time_col:
+            fallback_label = _extract_month_label(selected_rows[fallback_col])
+            if fallback_label.notna().sum() > 0:
+                st.info(
+                    f"Không tách được thời gian từ cột '{time_col}'. "
+                    f"Đang dùng tự động cột '{fallback_col}'."
+                )
+                time_col = fallback_col
+                time_label = fallback_label
 
     summary = (
         pd.DataFrame({"Thời gian": time_label})
@@ -283,7 +323,11 @@ def _render_time_summary_for_all_sheets(
         if df.empty or len(df.columns) == 0:
             continue
 
-        col_for_time = preferred_time_col if preferred_time_col in df.columns else _guess_time_column(df)
+        col_for_time = None
+        if preferred_time_col in df.columns and _time_parse_success_rate(df[preferred_time_col]) > 0:
+            col_for_time = preferred_time_col
+        else:
+            col_for_time = _guess_time_column(df)
         if col_for_time is None:
             continue
 
@@ -347,6 +391,16 @@ def _render_doi_shopee_summary(
         st.warning("Không tìm thấy cột thời gian trong tab ĐỔI SHOPEE.")
         return
 
+    effective_time_col = time_col
+    if _time_parse_success_rate(df[effective_time_col]) == 0:
+        fallback_col = _guess_time_column(df)
+        if fallback_col and fallback_col != effective_time_col:
+            effective_time_col = fallback_col
+            st.info(
+                f"Không tách được thời gian từ cột '{time_col}'. "
+                f"Đang dùng tự động cột '{effective_time_col}' cho phần ĐỔI SHOPEE."
+            )
+
     working = df.copy()
     working["_reason_raw"] = working[reason_col].fillna("").astype(str)
 
@@ -397,7 +451,7 @@ def _render_doi_shopee_summary(
         st.info("Không có dữ liệu khớp với các nhóm Lý do đã chọn.")
         return
 
-    working["Tháng"] = _extract_month_label(working[time_col])
+    working["Tháng"] = _extract_month_label(working[effective_time_col])
     working = working[working["Tháng"].notna()].copy()
 
     if working.empty:
