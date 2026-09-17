@@ -183,6 +183,12 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         st.info("Hãy chọn ít nhất một nhóm Lý do để phân tích.")
         return
 
+    reason_search = st.text_input(
+        "Tìm trong cột Lý do (ví dụ: lỗi, linh kiện, bù)",
+        value="",
+        key="doi_shopee_reason_search",
+    ).strip()
+
     def map_reason_group(text: str) -> str | None:
         normalized = _normalize_text(text)
         for group_name in selected_groups:
@@ -193,6 +199,15 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
 
     working["_reason_group"] = working["_reason_raw"].map(map_reason_group)
     working = working[working["_reason_group"].notna()].copy()
+
+    if reason_search:
+        normalized_search = _normalize_text(reason_search)
+        working = working[
+            working["_reason_raw"]
+            .astype(str)
+            .map(_normalize_text)
+            .str.contains(re.escape(normalized_search), na=False)
+        ].copy()
 
     if working.empty:
         st.info("Không có dữ liệu khớp với các nhóm Lý do đã chọn.")
@@ -210,7 +225,25 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         )
         return
 
-    working["Tháng"] = working["_month"].dt.to_period("M").astype(str)
+    working["Tháng"] = working["_month"].dt.strftime("%m/%Y")
+
+    month_options = sorted(working["Tháng"].dropna().unique().tolist())
+    selected_months = st.multiselect(
+        "Lọc theo tháng (tách từ cột A)",
+        options=month_options,
+        default=month_options,
+        key="doi_shopee_month_filter",
+    )
+
+    if not selected_months:
+        st.info("Hãy chọn ít nhất một tháng để xem tổng hợp.")
+        return
+
+    working = working[working["Tháng"].isin(selected_months)].copy()
+
+    if working.empty:
+        st.info("Không có dữ liệu sau khi lọc theo tháng.")
+        return
 
     monthly = (
         working.groupby(["Tháng", "_reason_group"], as_index=False)
