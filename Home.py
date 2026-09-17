@@ -157,7 +157,7 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
     if not ddmm.empty:
         day = ddmm[0].str.zfill(2)
         month = ddmm[1].str.zfill(2)
-        year = ddmm[2].fillna("2026")
+        year = ddmm[2].fillna(str(datetime.now().year))
         year = year.map(lambda y: f"20{y}" if len(y) == 2 else y)
         parsed_ddmm = pd.to_datetime(
             day + "/" + month + "/" + year,
@@ -169,6 +169,55 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
 
     month_value = month_from_code.fillna(parsed_ddmm)
     return month_value.dt.strftime("%m/%Y")
+
+
+def _render_all_sheets_time_summary(tabs_data: dict[str, pd.DataFrame]) -> None:
+    st.subheader("Tổng hợp theo thời gian - tất cả sheet")
+
+    parts: list[pd.DataFrame] = []
+    for sheet_name, df in tabs_data.items():
+        if df.empty or len(df.columns) == 0:
+            continue
+
+        time_label = _extract_month_label(df.iloc[:, 0])
+        part = pd.DataFrame({
+            "Sheet": sheet_name,
+            "Thời gian": time_label,
+        })
+        part = part[part["Thời gian"].notna()].copy()
+        if not part.empty:
+            parts.append(part)
+
+    if not parts:
+        st.info(
+            "Không tìm thấy dữ liệu thời gian trong cột A của các sheet. "
+            "Định dạng hỗ trợ: yymmdd... hoặc dd/mm."
+        )
+        return
+
+    all_time_data = pd.concat(parts, ignore_index=True)
+
+    summary = (
+        all_time_data.groupby("Thời gian", as_index=False)
+        .size()
+        .rename(columns={"size": "Số lượng"})
+    )
+    summary["_sort_date"] = pd.to_datetime(
+        "01/" + summary["Thời gian"], format="%d/%m/%Y", errors="coerce"
+    )
+    summary = summary.sort_values("_sort_date").drop(columns=["_sort_date"])
+
+    st.markdown("**Bảng 2 cột: Thời gian và Số lượng**")
+    st.dataframe(summary, width="stretch")
+
+    chart = px.line(
+        summary,
+        x="Thời gian",
+        y="Số lượng",
+        markers=True,
+        title="Xu hướng số lượng theo thời gian (toàn bộ sheet)",
+    )
+    st.plotly_chart(chart, width="stretch")
 
 
 def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
@@ -348,6 +397,8 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
         st.dataframe(stats, width="stretch")
     else:
         st.info("Google Sheet không có dữ liệu để hiển thị.")
+
+    _render_all_sheets_time_summary(tabs_data)
 
     st.subheader("Xem dữ liệu chi tiết")
     selected_sheet = st.selectbox("Chọn tab", list(tabs_data.keys()))
