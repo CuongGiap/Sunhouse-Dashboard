@@ -150,23 +150,35 @@ def _find_reason_column(df: pd.DataFrame) -> str | None:
 def _extract_month_label(series: pd.Series) -> pd.Series:
     raw = series.fillna("").astype(str).str.strip()
 
+    def _month_str(datetime_series: pd.Series) -> pd.Series:
+        month_str = pd.Series(pd.NA, index=raw.index, dtype="object")
+        valid = datetime_series.notna() & datetime_series.dt.year.between(
+            2000, 2100, inclusive="both"
+        )
+        month_str.loc[valid] = datetime_series.loc[valid].dt.strftime("%m/%Y")
+        return month_str
+
     yymmdd_prefix = raw.str.extract(r"^(\d{6})", expand=False)
-    month_from_code = pd.to_datetime(yymmdd_prefix, format="%y%m%d", errors="coerce")
+    month_from_code = _month_str(
+        pd.to_datetime(yymmdd_prefix, format="%y%m%d", errors="coerce")
+    )
 
     yyyymmdd_prefix = raw.str.extract(r"^(\d{8})", expand=False)
-    month_from_yyyymmdd = pd.to_datetime(
-        yyyymmdd_prefix, format="%Y%m%d", errors="coerce"
+    month_from_yyyymmdd = _month_str(
+        pd.to_datetime(yyyymmdd_prefix, format="%Y%m%d", errors="coerce")
     )
 
     yyyymm = raw.str.extract(r"^(\d{4})(\d{2})$", expand=True)
     if not yyyymm.empty:
-        parsed_yyyymm = pd.to_datetime(
-            yyyymm[0] + "-" + yyyymm[1] + "-01",
-            format="%Y-%m-%d",
-            errors="coerce",
+        parsed_yyyymm = _month_str(
+            pd.to_datetime(
+                yyyymm[0] + "-" + yyyymm[1] + "-01",
+                format="%Y-%m-%d",
+                errors="coerce",
+            )
         )
     else:
-        parsed_yyyymm = pd.Series(pd.NaT, index=raw.index)
+        parsed_yyyymm = pd.Series(pd.NA, index=raw.index, dtype="object")
 
     ddmm = raw.str.extract(r"^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?")
     if not ddmm.empty:
@@ -174,53 +186,55 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
         month = ddmm[1].str.zfill(2)
         year = ddmm[2].fillna(str(datetime.now().year))
         year = year.map(lambda y: f"20{y}" if len(y) == 2 else y)
-        parsed_ddmm = pd.to_datetime(
-            day + "/" + month + "/" + year,
-            format="%d/%m/%Y",
-            errors="coerce",
+        parsed_ddmm = _month_str(
+            pd.to_datetime(
+                day + "/" + month + "/" + year,
+                format="%d/%m/%Y",
+                errors="coerce",
+            )
         )
     else:
-        parsed_ddmm = pd.Series(pd.NaT, index=raw.index)
+        parsed_ddmm = pd.Series(pd.NA, index=raw.index, dtype="object")
 
     yyyymmdd_with_sep = raw.str.extract(
         r"^(\d{4})[/-](\d{1,2})[/-](\d{1,2})", expand=True
     )
     if not yyyymmdd_with_sep.empty:
-        parsed_yyyymmdd_sep = pd.to_datetime(
-            yyyymmdd_with_sep[0]
-            + "-"
-            + yyyymmdd_with_sep[1].str.zfill(2)
-            + "-"
-            + yyyymmdd_with_sep[2].str.zfill(2),
-            format="%Y-%m-%d",
-            errors="coerce",
+        parsed_yyyymmdd_sep = _month_str(
+            pd.to_datetime(
+                yyyymmdd_with_sep[0]
+                + "-"
+                + yyyymmdd_with_sep[1].str.zfill(2)
+                + "-"
+                + yyyymmdd_with_sep[2].str.zfill(2),
+                format="%Y-%m-%d",
+                errors="coerce",
+            )
         )
     else:
-        parsed_yyyymmdd_sep = pd.Series(pd.NaT, index=raw.index)
+        parsed_yyyymmdd_sep = pd.Series(pd.NA, index=raw.index, dtype="object")
 
     excel_serial = pd.to_numeric(raw, errors="coerce")
     # Excel serial dates are typically within this range for modern business data.
     excel_serial = excel_serial.where(excel_serial.between(1, 100000))
-    parsed_excel_serial = pd.to_datetime(
-        excel_serial,
-        unit="D",
-        origin="1899-12-30",
-        errors="coerce",
+    parsed_excel_serial = _month_str(
+        pd.to_datetime(
+            excel_serial,
+            unit="D",
+            origin="1899-12-30",
+            errors="coerce",
+        )
     )
 
-    generic_parsed = pd.to_datetime(raw, errors="coerce", dayfirst=True)
+    generic_parsed = _month_str(pd.to_datetime(raw, errors="coerce", dayfirst=True))
 
-    month_value = month_from_code
-    month_value = month_value.fillna(month_from_yyyymmdd)
+    month_value = month_from_code.fillna(month_from_yyyymmdd)
     month_value = month_value.fillna(parsed_yyyymm)
     month_value = month_value.fillna(parsed_ddmm)
     month_value = month_value.fillna(parsed_yyyymmdd_sep)
     month_value = month_value.fillna(parsed_excel_serial)
     month_value = month_value.fillna(generic_parsed)
-
-    valid_year = month_value.dt.year.between(2000, 2100, inclusive="both")
-    month_value = month_value.where(valid_year)
-    return month_value.dt.strftime("%m/%Y")
+    return month_value
 
 
 def _find_msp_column(df: pd.DataFrame) -> str | None:
