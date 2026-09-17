@@ -171,42 +171,45 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
     return month_value.dt.strftime("%m/%Y")
 
 
-def _render_all_sheets_time_summary(tabs_data: dict[str, pd.DataFrame]) -> None:
-    st.subheader("Tổng hợp theo thời gian - tất cả sheet")
+def _render_time_summary_for_sheet(
+    source_df: pd.DataFrame,
+    filtered_df: pd.DataFrame,
+    sheet_name: str,
+) -> None:
+    st.subheader("Tổng hợp theo thời gian - sheet đang chọn")
 
-    parts: list[pd.DataFrame] = []
-    for sheet_name, df in tabs_data.items():
-        if df.empty or len(df.columns) == 0:
-            continue
+    if source_df.empty or len(source_df.columns) == 0:
+        st.info("Sheet đang chọn không có dữ liệu.")
+        return
 
-        time_label = _extract_month_label(df.iloc[:, 0])
-        part = pd.DataFrame({
-            "Sheet": sheet_name,
-            "Thời gian": time_label,
-        })
-        part = part[part["Thời gian"].notna()].copy()
-        if not part.empty:
-            parts.append(part)
+    if filtered_df.empty:
+        st.info("Không có dữ liệu sau khi filter để tổng hợp theo thời gian.")
+        return
 
-    if not parts:
+    selected_rows = source_df.loc[filtered_df.index].copy()
+    time_label = _extract_month_label(selected_rows.iloc[:, 0])
+
+    summary = (
+        pd.DataFrame({"Thời gian": time_label})
+        .dropna(subset=["Thời gian"])
+        .groupby("Thời gian", as_index=False)
+        .size()
+        .rename(columns={"size": "Số lượng"})
+    )
+
+    if summary.empty:
         st.info(
-            "Không tìm thấy dữ liệu thời gian trong cột A của các sheet. "
+            "Không tách được thời gian từ cột A của sheet đã chọn. "
             "Định dạng hỗ trợ: yymmdd... hoặc dd/mm."
         )
         return
 
-    all_time_data = pd.concat(parts, ignore_index=True)
-
-    summary = (
-        all_time_data.groupby("Thời gian", as_index=False)
-        .size()
-        .rename(columns={"size": "Số lượng"})
-    )
     summary["_sort_date"] = pd.to_datetime(
         "01/" + summary["Thời gian"], format="%d/%m/%Y", errors="coerce"
     )
     summary = summary.sort_values("_sort_date").drop(columns=["_sort_date"])
 
+    st.caption(f"Sheet: {sheet_name}")
     st.markdown("**Bảng 2 cột: Thời gian và Số lượng**")
     st.dataframe(summary, width="stretch")
 
@@ -398,8 +401,6 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
     else:
         st.info("Google Sheet không có dữ liệu để hiển thị.")
 
-    _render_all_sheets_time_summary(tabs_data)
-
     st.subheader("Xem dữ liệu chi tiết")
     selected_sheet = st.selectbox("Chọn tab", list(tabs_data.keys()))
     selected_df = tabs_data[selected_sheet]
@@ -411,6 +412,8 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
     c5.metric("Số cột", len(filtered_df.columns))
 
     st.dataframe(filtered_df, width="stretch", height=500)
+
+    _render_time_summary_for_sheet(selected_df, filtered_df, selected_sheet)
 
     _render_doi_shopee_summary(selected_df, selected_sheet)
 
