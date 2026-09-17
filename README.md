@@ -27,6 +27,7 @@ App ho tro 2 che do:
 Xem mau day du trong `.env.example`:
 
 - `GOOGLE_AUTH_MODE=oauth|service_account`
+- `APP_ACCESS_TOKEN` (tuy chon, khoa truy cap UI)
 - `GOOGLE_CLIENT_SECRET_FILE`
 - `GOOGLE_TOKEN_FILE`
 - `GOOGLE_SERVICE_ACCOUNT_FILE`
@@ -46,7 +47,8 @@ Xem mau day du trong `.env.example`:
 8. Sua lai 2 gia tri bat buoc trong Secrets:
    - `GOOGLE_SPREADSHEET`
    - `GOOGLE_SERVICE_ACCOUNT_JSON`
-9. Bam Deploy app.
+9. Khuyen nghi them `APP_ACCESS_TOKEN` de tao lop bao ve thu 2 cho nguoi dung vao app.
+10. Bam Deploy app.
 
 Goi y: neu nhap JSON tren cloud, giu nguyen toan bo chuoi JSON (gom private_key).
 App da duoc cap nhat de doc ca environment variables va Streamlit secrets.
@@ -74,6 +76,9 @@ Cac file nhay cam da duoc ignore:
 - `*.apps.googleusercontent.com.json`
 
 Khong commit service account JSON vao repo.
+
+Neu can gioi han truy cap o tang ung dung, dat them `APP_ACCESS_TOKEN` trong Secrets.
+Nguoi dung se phai nhap ma truy cap moi vao duoc dashboard.
 
 ## Checklist xu ly loi sau deploy (Streamlit Cloud)
 

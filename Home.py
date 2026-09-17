@@ -21,9 +21,46 @@ if "spreadsheet_id" not in st.session_state:
     st.session_state.spreadsheet_id = None
 if "loaded_at" not in st.session_state:
     st.session_state.loaded_at = None
+if "auth_ok" not in st.session_state:
+    st.session_state.auth_ok = False
+
+
+def _require_app_access() -> None:
+    expected_token = (SETTINGS.app_access_token or "").strip()
+    if not expected_token:
+        st.session_state.auth_ok = True
+        return
+
+    if st.session_state.auth_ok:
+        return
+
+    st.warning("Ứng dụng yêu cầu mã truy cập.")
+    with st.form("app-access-form", clear_on_submit=True):
+        input_token = st.text_input("Mã truy cập", type="password")
+        submitted = st.form_submit_button("Đăng nhập")
+
+    if submitted:
+        if input_token == expected_token:
+            st.session_state.auth_ok = True
+            st.rerun()
+        else:
+            st.error("Mã truy cập không đúng.")
+
+    st.stop()
+
+
+_require_app_access()
 
 with st.sidebar:
     st.header("Cấu hình")
+    if SETTINGS.app_access_token.strip():
+        if st.button("Đăng xuất", type="secondary"):
+            st.session_state.auth_ok = False
+            st.session_state.tabs_data = None
+            st.session_state.spreadsheet_id = None
+            st.session_state.loaded_at = None
+            st.rerun()
+
     sheet_input = st.text_input(
         "Spreadsheet URL / ID",
         value=SETTINGS.spreadsheet_default,

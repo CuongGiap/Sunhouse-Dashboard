@@ -54,6 +54,7 @@ def _resolve_path(path_value: str) -> str:
 
 @dataclass(frozen=True)
 class AppSettings:
+    app_access_token: str = _read_setting("APP_ACCESS_TOKEN", "")
     google_auth_mode: str = _read_setting("GOOGLE_AUTH_MODE", "oauth").strip().lower()
     client_secret_file: str = _resolve_path(
         _read_setting("GOOGLE_CLIENT_SECRET_FILE", "credentials.json")
