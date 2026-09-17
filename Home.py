@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import re
+import unicodedata
 
 import pandas as pd
 import plotly.express as px
@@ -125,6 +127,114 @@ def _filter_dataframe(source_df: pd.DataFrame) -> pd.DataFrame:
     return displayed_df
 
 
+def _normalize_text(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.lower().strip()
+
+
+def _find_reason_column(df: pd.DataFrame) -> str | None:
+    normalized_map = {col: _normalize_text(col) for col in df.columns}
+
+    for col, normalized in normalized_map.items():
+        if "ly do" in normalized:
+            return col
+
+    for col, normalized in normalized_map.items():
+        if "loi" in normalized and "do" in normalized:
+            return col
+
+    return None
+
+
+def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
+    if _normalize_text(selected_sheet) != "doi shopee":
+        return
+
+    st.subheader("Phân tích lỗi theo tháng - ĐỔI SHOPEE")
+
+    if df.empty:
+        st.info("Tab ĐỔI SHOPEE đang trống dữ liệu.")
+        return
+
+    reason_col = _find_reason_column(df)
+    if reason_col is None:
+        st.warning("Không tìm thấy cột Lý do trong tab ĐỔI SHOPEE.")
+        return
+
+    first_col = df.columns[0]
+    working = df.copy()
+    working["_reason_raw"] = working[reason_col].fillna("").astype(str)
+
+    keyword_map = {
+        "Lỗi": ["loi"],
+        "Linh kiện": ["linh kien"],
+        "Bù": ["bu"],
+    }
+
+    selected_groups = st.multiselect(
+        "Lọc theo nhóm Lý do",
+        options=list(keyword_map.keys()),
+        default=list(keyword_map.keys()),
+        key="doi_shopee_reason_groups",
+    )
+
+    if not selected_groups:
+        st.info("Hãy chọn ít nhất một nhóm Lý do để phân tích.")
+        return
+
+    def map_reason_group(text: str) -> str | None:
+        normalized = _normalize_text(text)
+        for group_name in selected_groups:
+            keywords = keyword_map[group_name]
+            if any(keyword in normalized for keyword in keywords):
+                return group_name
+        return None
+
+    working["_reason_group"] = working["_reason_raw"].map(map_reason_group)
+    working = working[working["_reason_group"].notna()].copy()
+
+    if working.empty:
+        st.info("Không có dữ liệu khớp với các nhóm Lý do đã chọn.")
+        return
+
+    code_series = working[first_col].fillna("").astype(str)
+    date_part = code_series.str.extract(r"^(\d{6})", expand=False)
+    working["_month"] = pd.to_datetime(date_part, format="%y%m%d", errors="coerce")
+    working = working[working["_month"].notna()].copy()
+
+    if working.empty:
+        st.warning(
+            "Không tách được tháng từ cột A. "
+            "Định dạng mong đợi là 6 số đầu kiểu yymmdd (ví dụ: 260901...)."
+        )
+        return
+
+    working["Tháng"] = working["_month"].dt.to_period("M").astype(str)
+
+    monthly = (
+        working.groupby(["Tháng", "_reason_group"], as_index=False)
+        .size()
+        .rename(columns={"_reason_group": "Nhóm lý do", "size": "Số lượng"})
+        .sort_values(["Tháng", "Nhóm lý do"])
+    )
+
+    c1, c2 = st.columns(2)
+    c1.metric("Số bản ghi khớp", len(working))
+    c2.metric("Số tháng", monthly["Tháng"].nunique())
+
+    chart = px.bar(
+        monthly,
+        x="Tháng",
+        y="Số lượng",
+        color="Nhóm lý do",
+        barmode="group",
+        title="Tổng hợp Lý do theo tháng (ĐỔI SHOPEE)",
+    )
+    st.plotly_chart(chart, width="stretch")
+    st.dataframe(monthly, width="stretch")
+
+
 def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) -> None:
     total_tabs = len(tabs_data)
     total_rows = sum(len(df) for df in tabs_data.values())
@@ -182,6 +292,8 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
     c5.metric("Số cột", len(filtered_df.columns))
 
     st.dataframe(filtered_df, width="stretch", height=500)
+
+    _render_doi_shopee_summary(selected_df, selected_sheet)
 
 
 col_load, col_refresh = st.columns([2, 1])
