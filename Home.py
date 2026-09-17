@@ -199,6 +199,8 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
         parsed_yyyymmdd_sep = pd.Series(pd.NaT, index=raw.index)
 
     excel_serial = pd.to_numeric(raw, errors="coerce")
+    # Excel serial dates are typically within this range for modern business data.
+    excel_serial = excel_serial.where(excel_serial.between(1, 100000))
     parsed_excel_serial = pd.to_datetime(
         excel_serial,
         unit="D",
