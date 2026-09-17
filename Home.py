@@ -185,10 +185,39 @@ def _find_msp_column(df: pd.DataFrame) -> str | None:
     return None
 
 
+def _time_parse_success_rate(series: pd.Series) -> float:
+    labels = _extract_month_label(series)
+    if len(labels) == 0:
+        return 0.0
+    return float(labels.notna().mean())
+
+
+def _guess_time_column(df: pd.DataFrame) -> str | None:
+    if df.empty or len(df.columns) == 0:
+        return None
+
+    msp_col = _find_msp_column(df)
+    if msp_col:
+        return msp_col
+
+    scored: list[tuple[str, float]] = []
+    for col in df.columns:
+        score = _time_parse_success_rate(df[col])
+        scored.append((col, score))
+
+    scored.sort(key=lambda item: item[1], reverse=True)
+    best_col, best_score = scored[0]
+    if best_score <= 0:
+        return None
+
+    return best_col
+
+
 def _render_time_summary_for_sheet(
     source_df: pd.DataFrame,
     filtered_df: pd.DataFrame,
     sheet_name: str,
+    time_col: str,
 ) -> None:
     st.subheader("Tổng hợp theo thời gian - sheet đang chọn")
 
@@ -200,13 +229,12 @@ def _render_time_summary_for_sheet(
         st.info("Không có dữ liệu sau khi filter để tổng hợp theo thời gian.")
         return
 
-    msp_col = _find_msp_column(source_df)
-    if msp_col is None:
-        st.warning("Không tìm thấy cột MSP trong sheet đang chọn.")
+    if time_col not in source_df.columns:
+        st.warning("Không tìm thấy cột thời gian trong sheet đang chọn.")
         return
 
     selected_rows = source_df.loc[filtered_df.index].copy()
-    time_label = _extract_month_label(selected_rows[msp_col])
+    time_label = _extract_month_label(selected_rows[time_col])
 
     summary = (
         pd.DataFrame({"Thời gian": time_label})
@@ -218,7 +246,7 @@ def _render_time_summary_for_sheet(
 
     if summary.empty:
         st.info(
-            "Không tách được thời gian từ cột MSP của sheet đã chọn. "
+            "Không tách được thời gian từ cột đã chọn của sheet. "
             "Định dạng hỗ trợ: yymmdd... hoặc dd/mm."
         )
         return
@@ -228,7 +256,7 @@ def _render_time_summary_for_sheet(
     )
     summary = summary.sort_values("_sort_date").drop(columns=["_sort_date"])
 
-    st.caption(f"Sheet: {sheet_name} | Cột MSP: {msp_col}")
+    st.caption(f"Sheet: {sheet_name} | Cột thời gian: {time_col}")
     st.markdown("**Bảng 2 cột: Thời gian và Số lượng**")
     st.dataframe(summary, width="stretch")
 
@@ -242,7 +270,10 @@ def _render_time_summary_for_sheet(
     st.plotly_chart(chart, width="stretch")
 
 
-def _render_time_summary_for_all_sheets(tabs_data: dict[str, pd.DataFrame]) -> None:
+def _render_time_summary_for_all_sheets(
+    tabs_data: dict[str, pd.DataFrame],
+    preferred_time_col: str,
+) -> None:
     if not tabs_data:
         st.info("Chưa có dữ liệu để tổng hợp.")
         return
@@ -252,18 +283,18 @@ def _render_time_summary_for_all_sheets(tabs_data: dict[str, pd.DataFrame]) -> N
         if df.empty or len(df.columns) == 0:
             continue
 
-        msp_col = _find_msp_column(df)
-        if msp_col is None:
+        col_for_time = preferred_time_col if preferred_time_col in df.columns else _guess_time_column(df)
+        if col_for_time is None:
             continue
 
-        part = pd.DataFrame({"Thời gian": _extract_month_label(df[msp_col])})
+        part = pd.DataFrame({"Thời gian": _extract_month_label(df[col_for_time])})
         part = part.dropna(subset=["Thời gian"]).copy()
         if not part.empty:
             parts.append(part)
 
     if not parts:
         st.info(
-            "Không tách được thời gian từ cột MSP ở các sheet. "
+            "Không tách được thời gian từ các cột dữ liệu ở các sheet. "
             "Định dạng hỗ trợ: yymmdd... hoặc dd/mm."
         )
         return
@@ -293,7 +324,11 @@ def _render_time_summary_for_all_sheets(tabs_data: dict[str, pd.DataFrame]) -> N
     st.plotly_chart(chart, width="stretch")
 
 
-def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
+def _render_doi_shopee_summary(
+    df: pd.DataFrame,
+    selected_sheet: str,
+    time_col: str,
+) -> None:
     if "doi shopee" not in _normalize_text(selected_sheet):
         return
 
@@ -308,9 +343,8 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         st.warning("Không tìm thấy cột Lý do trong tab ĐỔI SHOPEE.")
         return
 
-    msp_col = _find_msp_column(df)
-    if msp_col is None:
-        st.warning("Không tìm thấy cột MSP trong tab ĐỔI SHOPEE.")
+    if time_col not in df.columns:
+        st.warning("Không tìm thấy cột thời gian trong tab ĐỔI SHOPEE.")
         return
 
     working = df.copy()
@@ -363,12 +397,12 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         st.info("Không có dữ liệu khớp với các nhóm Lý do đã chọn.")
         return
 
-    working["Tháng"] = _extract_month_label(working[msp_col])
+    working["Tháng"] = _extract_month_label(working[time_col])
     working = working[working["Tháng"].notna()].copy()
 
     if working.empty:
         st.warning(
-            "Không tách được tháng từ cột MSP. "
+            "Không tách được tháng từ cột đã chọn. "
             "Hỗ trợ định dạng 6 số đầu kiểu yymmdd (260901...) hoặc ngày dd/mm."
         )
         return
@@ -479,6 +513,19 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
     selected_sheet = st.selectbox("Chọn tab", list(tabs_data.keys()))
     selected_df = tabs_data[selected_sheet]
 
+    guessed_time_col = _guess_time_column(selected_df)
+    time_col_options = list(selected_df.columns)
+    default_idx = 0
+    if guessed_time_col in time_col_options:
+        default_idx = time_col_options.index(guessed_time_col)
+
+    selected_time_col = st.selectbox(
+        "Cột dùng để tách Thời gian/Số lượng",
+        options=time_col_options,
+        index=default_idx,
+        help="Sẽ lấy 6 ký tự đầu (yymmdd...) hoặc dạng dd/mm để quy đổi ra tháng.",
+    )
+
     filtered_df = _filter_dataframe(selected_df)
 
     c4, c5 = st.columns(2)
@@ -495,11 +542,16 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
     )
 
     if summary_scope == "Tất cả sheet":
-        _render_time_summary_for_all_sheets(tabs_data)
+        _render_time_summary_for_all_sheets(tabs_data, selected_time_col)
     else:
-        _render_time_summary_for_sheet(selected_df, filtered_df, selected_sheet)
+        _render_time_summary_for_sheet(
+            selected_df,
+            filtered_df,
+            selected_sheet,
+            selected_time_col,
+        )
 
-    _render_doi_shopee_summary(selected_df, selected_sheet)
+    _render_doi_shopee_summary(selected_df, selected_sheet, selected_time_col)
 
 
 col_load, col_refresh = st.columns([2, 1])
