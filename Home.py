@@ -147,8 +147,32 @@ def _find_reason_column(df: pd.DataFrame) -> str | None:
     return None
 
 
+def _extract_month_label(series: pd.Series) -> pd.Series:
+    raw = series.fillna("").astype(str).str.strip()
+
+    yymmdd_prefix = raw.str.extract(r"^(\d{6})", expand=False)
+    month_from_code = pd.to_datetime(yymmdd_prefix, format="%y%m%d", errors="coerce")
+
+    ddmm = raw.str.extract(r"^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$")
+    if not ddmm.empty:
+        day = ddmm[0].str.zfill(2)
+        month = ddmm[1].str.zfill(2)
+        year = ddmm[2].fillna("2026")
+        year = year.map(lambda y: f"20{y}" if len(y) == 2 else y)
+        parsed_ddmm = pd.to_datetime(
+            day + "/" + month + "/" + year,
+            format="%d/%m/%Y",
+            errors="coerce",
+        )
+    else:
+        parsed_ddmm = pd.Series(pd.NaT, index=raw.index)
+
+    month_value = month_from_code.fillna(parsed_ddmm)
+    return month_value.dt.strftime("%m/%Y")
+
+
 def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
-    if _normalize_text(selected_sheet) != "doi shopee":
+    if "doi shopee" not in _normalize_text(selected_sheet):
         return
 
     st.subheader("Phân tích lỗi theo tháng - ĐỔI SHOPEE")
@@ -213,19 +237,15 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         st.info("Không có dữ liệu khớp với các nhóm Lý do đã chọn.")
         return
 
-    code_series = working[first_col].fillna("").astype(str)
-    date_part = code_series.str.extract(r"^(\d{6})", expand=False)
-    working["_month"] = pd.to_datetime(date_part, format="%y%m%d", errors="coerce")
-    working = working[working["_month"].notna()].copy()
+    working["Tháng"] = _extract_month_label(working[first_col])
+    working = working[working["Tháng"].notna()].copy()
 
     if working.empty:
         st.warning(
             "Không tách được tháng từ cột A. "
-            "Định dạng mong đợi là 6 số đầu kiểu yymmdd (ví dụ: 260901...)."
+            "Hỗ trợ định dạng 6 số đầu kiểu yymmdd (260901...) hoặc ngày dd/mm."
         )
         return
-
-    working["Tháng"] = working["_month"].dt.strftime("%m/%Y")
 
     month_options = sorted(working["Tháng"].dropna().unique().tolist())
     selected_months = st.multiselect(
@@ -252,6 +272,12 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
         .sort_values(["Tháng", "Nhóm lý do"])
     )
 
+    monthly["Tỷ lệ (%)"] = (
+        monthly["Số lượng"]
+        / monthly.groupby("Tháng")["Số lượng"].transform("sum")
+        * 100
+    ).round(2)
+
     c1, c2 = st.columns(2)
     c1.metric("Số bản ghi khớp", len(working))
     c2.metric("Số tháng", monthly["Tháng"].nunique())
@@ -266,6 +292,15 @@ def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
     )
     st.plotly_chart(chart, width="stretch")
     st.dataframe(monthly, width="stretch")
+
+    st.markdown("**Tổng hợp theo tháng (đủ số lượng và tỷ lệ)**")
+    pivot_counts = (
+        monthly.pivot(index="Tháng", columns="Nhóm lý do", values="Số lượng")
+        .fillna(0)
+        .astype(int)
+    )
+    pivot_counts["Tổng"] = pivot_counts.sum(axis=1)
+    st.dataframe(pivot_counts, width="stretch")
 
 
 def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) -> None:
