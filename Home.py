@@ -223,6 +223,53 @@ def _render_time_summary_for_sheet(
     st.plotly_chart(chart, width="stretch")
 
 
+def _render_time_summary_for_all_sheets(tabs_data: dict[str, pd.DataFrame]) -> None:
+    if not tabs_data:
+        st.info("Chưa có dữ liệu để tổng hợp.")
+        return
+
+    parts: list[pd.DataFrame] = []
+    for sheet_name, df in tabs_data.items():
+        if df.empty or len(df.columns) == 0:
+            continue
+
+        part = pd.DataFrame({"Thời gian": _extract_month_label(df.iloc[:, 0])})
+        part = part.dropna(subset=["Thời gian"]).copy()
+        if not part.empty:
+            parts.append(part)
+
+    if not parts:
+        st.info(
+            "Không tách được thời gian từ cột A ở các sheet. "
+            "Định dạng hỗ trợ: yymmdd... hoặc dd/mm."
+        )
+        return
+
+    summary = (
+        pd.concat(parts, ignore_index=True)
+        .groupby("Thời gian", as_index=False)
+        .size()
+        .rename(columns={"size": "Số lượng"})
+    )
+    summary["_sort_date"] = pd.to_datetime(
+        "01/" + summary["Thời gian"], format="%d/%m/%Y", errors="coerce"
+    )
+    summary = summary.sort_values("_sort_date").drop(columns=["_sort_date"])
+
+    st.caption("Phạm vi: Tất cả sheet")
+    st.markdown("**Bảng 2 cột: Thời gian và Số lượng**")
+    st.dataframe(summary, width="stretch")
+
+    chart = px.line(
+        summary,
+        x="Thời gian",
+        y="Số lượng",
+        markers=True,
+        title="Xu hướng số lượng theo thời gian (tất cả sheet)",
+    )
+    st.plotly_chart(chart, width="stretch")
+
+
 def _render_doi_shopee_summary(df: pd.DataFrame, selected_sheet: str) -> None:
     if "doi shopee" not in _normalize_text(selected_sheet):
         return
@@ -413,7 +460,17 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
 
     st.dataframe(filtered_df, width="stretch", height=500)
 
-    _render_time_summary_for_sheet(selected_df, filtered_df, selected_sheet)
+    summary_scope = st.radio(
+        "Phạm vi tổng hợp Thời gian/Số lượng",
+        options=["Sheet đang chọn", "Tất cả sheet"],
+        horizontal=True,
+        key="time_summary_scope",
+    )
+
+    if summary_scope == "Tất cả sheet":
+        _render_time_summary_for_all_sheets(tabs_data)
+    else:
+        _render_time_summary_for_sheet(selected_df, filtered_df, selected_sheet)
 
     _render_doi_shopee_summary(selected_df, selected_sheet)
 
