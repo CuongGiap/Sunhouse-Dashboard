@@ -1,11 +1,16 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Secrets - tuyệt đối không commit
 .env
 token.json
 credentials.json
+service-account.json
 client_secret_*.json
 *.apps.googleusercontent.com.json
-.streamlit/
-!.streamlit/
+
+# Streamlit: chặn toàn bộ secrets thật, chỉ cho phép file mẫu.
+# Dùng ".streamlit/*" (không phải ".streamlit/") để dòng "!" bên dưới có hiệu lực.
+.streamlit/*
 !.streamlit/secrets.example.toml

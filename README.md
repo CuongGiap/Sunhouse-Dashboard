@@ -32,7 +32,8 @@ Xem mau day du trong `.env.example`:
 - `GOOGLE_TOKEN_FILE`
 - `GOOGLE_SERVICE_ACCOUNT_FILE`
 - `GOOGLE_SERVICE_ACCOUNT_JSON`
-- `GOOGLE_SPREADSHEET`
+- `GOOGLE_SPREADSHEET` (bao cao "Bao Cao Loi Doi Hang")
+- `GOOGLE_SPREADSHEET_OPERATION` (bao cao "Bao Cao Chi So Van Hanh", tuy chon)
 - `CACHE_TTL_SECONDS`
 
 ## Deploy len Streamlit Community Cloud (khuyen nghi)
@@ -47,6 +48,7 @@ Xem mau day du trong `.env.example`:
 8. Sua lai 2 gia tri bat buoc trong Secrets:
    - `GOOGLE_SPREADSHEET`
    - `GOOGLE_SERVICE_ACCOUNT_JSON`
+   - `GOOGLE_SPREADSHEET_OPERATION` (neu muon bat bao cao thu 2)
 9. Khuyen nghi them `APP_ACCESS_TOKEN` de tao lop bao ve thu 2 cho nguoi dung vao app.
 10. Bam Deploy app.
 

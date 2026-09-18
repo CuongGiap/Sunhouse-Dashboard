@@ -65,6 +65,9 @@ class AppSettings:
     )
     service_account_json: str = _read_setting("GOOGLE_SERVICE_ACCOUNT_JSON", "")
     spreadsheet_default: str = _read_setting("GOOGLE_SPREADSHEET", "")
+    # Nguồn báo cáo thứ 2. Để trong cấu hình chứ không hardcode: repo này là public,
+    # ID của Google Sheet nội bộ không nên nằm trong source.
+    spreadsheet_operation: str = _read_setting("GOOGLE_SPREADSHEET_OPERATION", "")
     cache_ttl_seconds: int = int(_read_setting("CACHE_TTL_SECONDS", "300"))
 
 

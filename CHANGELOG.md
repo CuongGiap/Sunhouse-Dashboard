@@ -107,6 +107,35 @@ App production: https://sunhouse-dashboard.streamlit.app/
       đạt dải sáng, chroma, tương phản >= 3:1 và tách màu cho người mù màu (ΔE 21.6 protan)
       trên cả nền sáng lẫn nền tối, nên dùng chung một cặp cho mọi theme.
 
+25. (chưa commit) Rà soát bảo mật và xử lý các phát hiện ưu tiên
+    - **Xác thực fail-open (nghiêm trọng)**: khi `APP_ACCESS_TOKEN` trống/thiếu, code cũ gán
+      `auth_ok = True` → app mở công khai toàn bộ dữ liệu Sheet cho bất kỳ ai có URL. Đổi sang
+      fail-closed: thiếu cấu hình thì hiện lỗi, ghi log và `st.stop()`.
+    - **`.gitignore` không chặn private key (nghiêm trọng)**: dòng `!.streamlit/` vô hiệu hoá
+      ignore của cả thư mục nên `.streamlit/secrets.toml` sẽ bị commit; `service-account.json`
+      (đường dẫn mặc định trong `settings.py`) không hề có trong danh sách. Sửa thành
+      `.streamlit/*` + `!.streamlit/secrets.example.toml`, bổ sung `service-account.json`.
+      Đã kiểm chứng lại bằng `git check-ignore`. Lịch sử git sạch, chưa từng lộ credential.
+    - **Lộ traceback**: `st.exception(exc)` in nguyên stack trace kèm đường dẫn server cho
+      người dùng cuối → đổi thành `logger.exception` + thông báo lỗi chung.
+    - **So sánh mã truy cập**: `==` → `hmac.compare_digest` (constant-time), encode utf-8 để
+      mã có ký tự ngoài ASCII không ném `TypeError`.
+    - **Ô "Tìm nhanh trong bảng"**: từ khóa vẫn bị hiểu là regex, gõ `(` làm app crash →
+      thêm `regex=False`. (Đã test: không phải lỗ hổng ReDoS vì pandas dùng engine Arrow/RE2
+      không có backtracking, chỉ là crash.)
+    - **Chặn đọc sheet ngoài phạm vi**: bỏ ô nhập Spreadsheet URL/ID tự do ở sidebar (người
+      dùng có thể dán ID bất kỳ và app đọc bằng credential hệ thống). Thay bằng allowlist
+      phía server `REPORT_SOURCES`, người dùng chỉ chọn theo tên báo cáo:
+      "Báo Cáo Lỗi Đổi Hàng" (`GOOGLE_SPREADSHEET`) và "Báo Cáo Chỉ Số Vận Hành"
+      (`GOOGLE_SPREADSHEET_OPERATION`). Báo cáo chưa cấu hình sẽ tự ẩn khỏi danh sách.
+      Đổi báo cáo thì xoá dữ liệu đã tải để không hiển thị nhầm số của báo cáo trước.
+    - URL của báo cáo thứ 2 đặt trong cấu hình chứ không hardcode: repo này là public, ID
+      Google Sheet nội bộ không nên nằm trong source.
+    - Kiểm thử bằng `streamlit.testing.v1.AppTest`: thiếu token → app khoá, 0 ô nhập liệu;
+      nhập sai → bị từ chối; nhập đúng → vào được; sidebar không còn ô URL tự do.
+    - Còn tồn (chưa làm, theo thống nhất): rate limit/log truy cập, phân quyền theo người
+      dùng thật thay cho 1 mã dùng chung, pin version dependency.
+
 ## Các sự cố production đã xử lý (tổng hợp riêng để tra nhanh)
 
 | Sự cố | Nguyên nhân | Cách fix | Commit |
@@ -117,6 +146,8 @@ App production: https://sunhouse-dashboard.streamlit.app/
 | App crash `OverflowError` khi vào tab có cột số lớn | Convert số bất kỳ thành ngày kiểu Excel serial không giới hạn khoảng | Giới hạn giá trị hợp lệ trước khi convert | `fa86b24` |
 | App vẫn lỗi khi `fillna` giữa nhiều cột datetime64 | Các `Series` datetime khác đơn vị thời gian (unit) gây overflow khi gộp | Đổi pipeline sang gộp chuỗi `"MM/YYYY"` thay vì gộp datetime | `79e6660` |
 | Tính năng so sánh 2 từ khóa chưa đúng yêu cầu | Version đầu tìm toàn bảng, ra 2 bảng riêng thay vì 1 bảng 4 cột theo đúng 1 cột chỉ định | Viết lại `_render_dual_keyword_compare` theo đúng đặc tả STT/Date/giá trị 1/giá trị 2 | `047f203` |
+| Xác thực fail-open: thiếu `APP_ACCESS_TOKEN` là app mở công khai | Code cũ gán `auth_ok = True` khi không có token cấu hình | Fail-closed: hiện lỗi, ghi log, `st.stop()` | (chưa commit) |
+| `.gitignore` không chặn `.streamlit/secrets.toml` và `service-account.json` | Dòng `!.streamlit/` vô hiệu hoá ignore cả thư mục; thiếu hẳn `service-account.json` | Đổi sang `.streamlit/*` + negation file mẫu, bổ sung `service-account.json` | (chưa commit) |
 | Bảng so sánh không hiển thị giá trị nào | Không bỏ dấu tiếng Việt khi so khớp; từ khóa bị hiểu là regex; dòng khớp bị loại vì không tách được ngày | Chuẩn hoá `_normalize_text` + `re.escape`, fallback cột thời gian, hiển thị số dòng khớp và số dòng thiếu ngày | (chưa commit) |
 
 ## Bảo mật
@@ -136,5 +167,7 @@ App production: https://sunhouse-dashboard.streamlit.app/
   sánh 2 từ khóa theo 1 cột chỉ định (STT/Date/giá trị 1/giá trị 2) kèm biểu đồ xu hướng.
 - Bảng so sánh tìm kiếm không phân biệt hoa thường và dấu tiếng Việt, an toàn với ký tự đặc
   biệt, và báo rõ khi không khớp từ khóa hoặc không tách được ngày.
-- Sidebar gọn còn ô Spreadsheet URL và nút Đăng xuất ở cuối; bảng so sánh căn giữa, cột STT
-  và Date thu hẹp.
+- Sidebar gọn còn bộ chọn báo cáo theo tên và nút Đăng xuất ở cuối; bảng so sánh căn giữa,
+  cột STT và Date thu hẹp.
+- Đã xử lý các phát hiện bảo mật ưu tiên (fail-closed auth, gitignore, ẩn traceback,
+  constant-time compare, chặn regex ở ô tìm nhanh, allowlist nguồn dữ liệu).

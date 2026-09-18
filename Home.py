@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import hmac
+import logging
 import re
 import unicodedata
 
@@ -11,6 +13,8 @@ import streamlit as st
 
 from src.google_sheets import GoogleSheetError, fetch_spreadsheet_data
 from src.settings import SETTINGS
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Google Sheets Dashboard", layout="wide")
 
@@ -30,8 +34,13 @@ if "auth_ok" not in st.session_state:
 def _require_app_access() -> None:
     expected_token = (SETTINGS.app_access_token or "").strip()
     if not expected_token:
-        st.session_state.auth_ok = True
-        return
+        # Fail-closed: thiếu cấu hình mã truy cập thì khoá app, không cho vào tự do.
+        st.error(
+            "Ứng dụng chưa được cấu hình mã truy cập (APP_ACCESS_TOKEN) nên đã bị khoá. "
+            "Vui lòng liên hệ quản trị viên để cấu hình trong Secrets."
+        )
+        logger.error("APP_ACCESS_TOKEN chưa được cấu hình - app bị khoá.")
+        st.stop()
 
     if st.session_state.auth_ok:
         return
@@ -42,10 +51,15 @@ def _require_app_access() -> None:
         submitted = st.form_submit_button("Đăng nhập")
 
     if submitted:
-        if input_token == expected_token:
+        # compare_digest: so sánh constant-time, tránh rò rỉ qua thời gian phản hồi.
+        # Encode utf-8 để mã có ký tự ngoài ASCII không làm hàm này ném lỗi.
+        if hmac.compare_digest(
+            (input_token or "").encode("utf-8"), expected_token.encode("utf-8")
+        ):
             st.session_state.auth_ok = True
             st.rerun()
         else:
+            logger.warning("Nhập sai mã truy cập.")
             st.error("Mã truy cập không đúng.")
 
     st.stop()
@@ -53,14 +67,38 @@ def _require_app_access() -> None:
 
 _require_app_access()
 
+# Danh sách báo cáo được phép mở. Người dùng chỉ chọn theo tên; URL do server giữ,
+# không nhận spreadsheet ID tuỳ ý từ phía client.
+REPORT_SOURCES: dict[str, str] = {
+    "Báo Cáo Lỗi Đổi Hàng": SETTINGS.spreadsheet_default.strip(),
+    "Báo Cáo Chỉ Số Vận Hành": SETTINGS.spreadsheet_operation.strip(),
+}
+AVAILABLE_REPORTS = [name for name, url in REPORT_SOURCES.items() if url]
+
 with st.sidebar:
     st.header("Cấu hình")
 
-    sheet_input = st.text_input(
-        "Spreadsheet URL / ID",
-        value=SETTINGS.spreadsheet_default,
-        help="Dán URL đầy đủ hoặc chỉ ID của Google Sheet",
+    if not AVAILABLE_REPORTS:
+        st.error("Chưa cấu hình báo cáo nào. Cần đặt GOOGLE_SPREADSHEET trong Secrets.")
+        st.stop()
+
+    selected_report = st.radio(
+        "Báo cáo",
+        options=AVAILABLE_REPORTS,
+        key="selected_report",
     )
+    sheet_input = REPORT_SOURCES[selected_report]
+
+    missing_reports = [name for name, url in REPORT_SOURCES.items() if not url]
+    if missing_reports:
+        st.caption(f"Chưa cấu hình: {', '.join(missing_reports)}")
+
+    # Đổi báo cáo thì bỏ dữ liệu cũ, tránh hiển thị nhầm số của báo cáo trước.
+    if st.session_state.get("loaded_report") not in (None, selected_report):
+        st.session_state.tabs_data = None
+        st.session_state.spreadsheet_id = None
+        st.session_state.loaded_at = None
+        st.session_state.loaded_report = None
 
     # Nút đăng xuất luôn nằm cuối sidebar.
     if SETTINGS.app_access_token.strip():
@@ -117,7 +155,9 @@ def _filter_dataframe(source_df: pd.DataFrame) -> pd.DataFrame:
 
     if search_keyword:
         mask = displayed_df.astype(str).apply(
-            lambda col: col.str.contains(search_keyword, case=False, na=False)
+            lambda col: col.str.contains(
+                search_keyword, case=False, na=False, regex=False
+            )
         )
         displayed_df = displayed_df[mask.any(axis=1)]
 
@@ -929,12 +969,18 @@ if load_button or refresh_button:
             st.session_state.tabs_data = data
             st.session_state.spreadsheet_id = spreadsheet_id
             st.session_state.loaded_at = datetime.now()
+            st.session_state.loaded_report = selected_report
             st.success("Tải dữ liệu thành công.")
 
     except GoogleSheetError as exc:
         st.error(str(exc))
-    except Exception as exc:
-        st.exception(exc)
+    except Exception:
+        # Traceback chỉ ghi vào log server, không hiển thị cho người dùng cuối
+        # (tránh lộ đường dẫn, cấu hình và chi tiết nội bộ).
+        logger.exception("Lỗi khi tải dữ liệu Google Sheets")
+        st.error(
+            "Đã xảy ra lỗi khi tải dữ liệu. Vui lòng thử lại hoặc liên hệ quản trị viên."
+        )
 
 if st.session_state.tabs_data and st.session_state.spreadsheet_id:
     render_dashboard(st.session_state.tabs_data, st.session_state.spreadsheet_id)
