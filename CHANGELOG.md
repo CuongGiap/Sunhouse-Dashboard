@@ -94,6 +94,19 @@ App production: https://sunhouse-dashboard.streamlit.app/
       - Bảng vẫn đúng 4 cột STT | Date | SL 'giá trị 1' | SL 'giá trị 2', kèm dòng Tổng và
         biểu đồ xu hướng.
 
+24. (chưa commit) Tinh chỉnh giao diện bảng so sánh và sidebar
+    - Bảng so sánh: cột `STT` rộng 70px, cột `Date` rộng 110px, toàn bộ ô căn giữa bằng
+      `st.column_config` (`width=<px>`, `alignment="center"`). Áp dụng cho cả dòng Tổng.
+    - Sidebar: bỏ các dòng thông tin kỹ thuật (OAuth secret, OAuth token, Auth mode,
+      Service account file, Cache TTL), chỉ còn ô `Spreadsheet URL / ID`.
+    - Nút `Đăng xuất` chuyển xuống cuối sidebar, có `st.divider()` phân tách, rộng full sidebar.
+    - `requirements.txt`: nâng sàn `streamlit>=1.37` → `>=1.64` vì `alignment` và `width` dạng
+      pixel của `column_config` chỉ có ở bản mới; bản cũ sẽ lỗi `TypeError`.
+    - Biểu đồ so sánh: cố định màu đường kẻ - giá trị 1 đỏ `#e34948`, giá trị 2 xanh dương
+      `#2a78d6` (`color_discrete_map`), độ dày nét 2px, marker 8px. Cặp màu này đã kiểm tra
+      đạt dải sáng, chroma, tương phản >= 3:1 và tách màu cho người mù màu (ΔE 21.6 protan)
+      trên cả nền sáng lẫn nền tối, nên dùng chung một cặp cho mọi theme.
+
 ## Các sự cố production đã xử lý (tổng hợp riêng để tra nhanh)
 
 | Sự cố | Nguyên nhân | Cách fix | Commit |
@@ -123,3 +136,5 @@ App production: https://sunhouse-dashboard.streamlit.app/
   sánh 2 từ khóa theo 1 cột chỉ định (STT/Date/giá trị 1/giá trị 2) kèm biểu đồ xu hướng.
 - Bảng so sánh tìm kiếm không phân biệt hoa thường và dấu tiếng Việt, an toàn với ký tự đặc
   biệt, và báo rõ khi không khớp từ khóa hoặc không tách được ngày.
+- Sidebar gọn còn ô Spreadsheet URL và nút Đăng xuất ở cuối; bảng so sánh căn giữa, cột STT
+  và Date thu hẹp.

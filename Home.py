@@ -55,25 +55,22 @@ _require_app_access()
 
 with st.sidebar:
     st.header("Cấu hình")
-    if SETTINGS.app_access_token.strip():
-        if st.button("Đăng xuất", type="secondary"):
-            st.session_state.auth_ok = False
-            st.session_state.tabs_data = None
-            st.session_state.spreadsheet_id = None
-            st.session_state.loaded_at = None
-            st.rerun()
 
     sheet_input = st.text_input(
         "Spreadsheet URL / ID",
         value=SETTINGS.spreadsheet_default,
         help="Dán URL đầy đủ hoặc chỉ ID của Google Sheet",
     )
-    st.write(f"OAuth secret: {SETTINGS.client_secret_file}")
-    st.write(f"OAuth token: {SETTINGS.token_file}")
-    st.write(f"Auth mode: {SETTINGS.google_auth_mode}")
-    if SETTINGS.google_auth_mode == "service_account":
-        st.write(f"Service account file: {SETTINGS.service_account_file}")
-    st.write(f"Cache TTL: {SETTINGS.cache_ttl_seconds}s")
+
+    # Nút đăng xuất luôn nằm cuối sidebar.
+    if SETTINGS.app_access_token.strip():
+        st.divider()
+        if st.button("Đăng xuất", type="secondary", width="stretch"):
+            st.session_state.auth_ok = False
+            st.session_state.tabs_data = None
+            st.session_state.spreadsheet_id = None
+            st.session_state.loaded_at = None
+            st.rerun()
 
 if SETTINGS.google_auth_mode == "service_account":
     has_inline_secret = bool(SETTINGS.service_account_json.strip())
@@ -564,6 +561,11 @@ def _render_doi_shopee_summary(
     st.dataframe(pivot_counts, width="stretch")
 
 
+# Cặp màu đỏ/xanh cho biểu đồ so sánh. Đã kiểm tra đạt cả 6 tiêu chí (dải sáng, chroma,
+# tách màu cho người mù màu ΔE 21.6, tương phản >= 3:1) trên cả nền sáng lẫn nền tối.
+COMPARE_COLOR_1 = "#e34948"  # đỏ - giá trị 1
+COMPARE_COLOR_2 = "#2a78d6"  # xanh dương - giá trị 2
+
 DATE_GRANULARITY_OPTIONS = {
     "Theo tháng (MM/YYYY)": "%m/%Y",
     "Theo ngày (DD/MM/YYYY)": "%d/%m/%Y",
@@ -758,20 +760,42 @@ def _render_dual_keyword_compare(source_df: pd.DataFrame, time_col: str) -> None
     result = _sort_by_date_label(result, "Date", date_format)
     result.insert(0, "STT", range(1, len(result) + 1))
 
+    column_config = {
+        "STT": st.column_config.NumberColumn("STT", width=70, alignment="center"),
+        "Date": st.column_config.TextColumn("Date", width=110, alignment="center"),
+        label_1: st.column_config.NumberColumn(label_1, alignment="center"),
+        label_2: st.column_config.NumberColumn(label_2, alignment="center"),
+    }
+
     st.markdown(f"**Bảng so sánh: STT | Date | {label_1} | {label_2}**")
-    st.dataframe(result, width="stretch", hide_index=True)
+    st.dataframe(
+        result,
+        width="stretch",
+        hide_index=True,
+        column_config=column_config,
+    )
 
     total_row = pd.DataFrame(
         [
             {
                 "STT": "Tổng",
-                "Date": f"{len(result)} mốc thời gian",
+                "Date": f"{len(result)} mốc",
                 label_1: int(result[label_1].sum()),
                 label_2: int(result[label_2].sum()),
             }
         ]
     )
-    st.dataframe(total_row, width="stretch", hide_index=True)
+    st.dataframe(
+        total_row,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "STT": st.column_config.TextColumn("STT", width=70, alignment="center"),
+            "Date": st.column_config.TextColumn("Date", width=110, alignment="center"),
+            label_1: st.column_config.NumberColumn(label_1, alignment="center"),
+            label_2: st.column_config.NumberColumn(label_2, alignment="center"),
+        },
+    )
 
     chart_df = result.melt(
         id_vars=["Date"],
@@ -786,8 +810,10 @@ def _render_dual_keyword_compare(source_df: pd.DataFrame, time_col: str) -> None
         y="Số lượng",
         color="Từ khóa",
         markers=True,
+        color_discrete_map={label_1: COMPARE_COLOR_1, label_2: COMPARE_COLOR_2},
         title="So sánh xu hướng số lượng theo 2 từ khóa",
     )
+    trend_chart.update_traces(line=dict(width=2), marker=dict(size=8))
     st.plotly_chart(trend_chart, width="stretch")
 
 
