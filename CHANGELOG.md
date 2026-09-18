@@ -75,6 +75,25 @@ App production: https://sunhouse-dashboard.streamlit.app/
       - Cột 4: số lượng dòng khớp từ khóa 2 theo từng Date
     - Kèm biểu đồ line so sánh xu hướng số lượng theo 2 từ khóa theo Date.
 
+23. (chưa commit) Sửa lỗi bảng so sánh không ra giá trị
+    - **Nguyên nhân 1**: so khớp từ khóa không bỏ dấu tiếng Việt → gõ `loi` không khớp `Lỗi`
+      (phần ĐỔI SHOPEE đã chuẩn hoá bằng `_normalize_text`, phần so sánh thì chưa).
+    - **Nguyên nhân 2**: `str.contains` mặc định coi từ khóa là regex → từ khóa chứa `(`, `)`,
+      `+`... gây lỗi `Invalid regular expression` và không ra bảng.
+    - **Nguyên nhân 3**: dòng khớp từ khóa nhưng cột thời gian không tách được ngày thì bị
+      loại âm thầm, không có fallback sang cột thời gian khác, không báo rõ lý do.
+    - Cách fix:
+      - `_keyword_match_mask`: chuẩn hoá bỏ dấu + `re.escape`, thêm tuỳ chọn khớp chính xác cả ô.
+      - `_count_keyword_matches_by_date`: trả thêm (tổng dòng khớp, số dòng thiếu ngày) để hiển
+        thị chẩn đoán thay vì im lặng.
+      - Tự động fallback sang cột thời gian đoán được khi cột đang chọn không tách được ngày.
+      - Tách `_extract_date_label(series, date_format)` dùng chung; `_extract_month_label` trở
+        thành wrapper `%m/%Y` (giữ nguyên toàn bộ guard chống `OverflowError`).
+      - Thêm chọn đơn vị cột Date: theo tháng (MM/YYYY) hoặc theo ngày (DD/MM/YYYY).
+      - Thêm expander "Gợi ý giá trị đang có trong cột" (top 15) để nhập đúng từ khóa.
+      - Bảng vẫn đúng 4 cột STT | Date | SL 'giá trị 1' | SL 'giá trị 2', kèm dòng Tổng và
+        biểu đồ xu hướng.
+
 ## Các sự cố production đã xử lý (tổng hợp riêng để tra nhanh)
 
 | Sự cố | Nguyên nhân | Cách fix | Commit |
@@ -85,6 +104,7 @@ App production: https://sunhouse-dashboard.streamlit.app/
 | App crash `OverflowError` khi vào tab có cột số lớn | Convert số bất kỳ thành ngày kiểu Excel serial không giới hạn khoảng | Giới hạn giá trị hợp lệ trước khi convert | `fa86b24` |
 | App vẫn lỗi khi `fillna` giữa nhiều cột datetime64 | Các `Series` datetime khác đơn vị thời gian (unit) gây overflow khi gộp | Đổi pipeline sang gộp chuỗi `"MM/YYYY"` thay vì gộp datetime | `79e6660` |
 | Tính năng so sánh 2 từ khóa chưa đúng yêu cầu | Version đầu tìm toàn bảng, ra 2 bảng riêng thay vì 1 bảng 4 cột theo đúng 1 cột chỉ định | Viết lại `_render_dual_keyword_compare` theo đúng đặc tả STT/Date/giá trị 1/giá trị 2 | `047f203` |
+| Bảng so sánh không hiển thị giá trị nào | Không bỏ dấu tiếng Việt khi so khớp; từ khóa bị hiểu là regex; dòng khớp bị loại vì không tách được ngày | Chuẩn hoá `_normalize_text` + `re.escape`, fallback cột thời gian, hiển thị số dòng khớp và số dòng thiếu ngày | (chưa commit) |
 
 ## Bảo mật
 
@@ -101,3 +121,5 @@ App production: https://sunhouse-dashboard.streamlit.app/
 - Có đầy đủ: thống kê theo tab, xem dữ liệu chi tiết có filter, tổng hợp Thời gian/Số lượng
   (theo sheet đang chọn hoặc tất cả sheet), phân tích riêng cho tab ĐỔI SHOPEE, và bảng so
   sánh 2 từ khóa theo 1 cột chỉ định (STT/Date/giá trị 1/giá trị 2) kèm biểu đồ xu hướng.
+- Bảng so sánh tìm kiếm không phân biệt hoa thường và dấu tiếng Việt, an toàn với ký tự đặc
+  biệt, và báo rõ khi không khớp từ khóa hoặc không tách được ngày.

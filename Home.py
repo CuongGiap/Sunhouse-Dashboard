@@ -147,7 +147,8 @@ def _find_reason_column(df: pd.DataFrame) -> str | None:
     return None
 
 
-def _extract_month_label(series: pd.Series) -> pd.Series:
+def _extract_date_label(series: pd.Series, date_format: str = "%m/%Y") -> pd.Series:
+    """Nhận diện nhiều định dạng ngày rồi format theo `date_format` (mặc định MM/YYYY)."""
     raw = series.fillna("").astype(str).str.strip()
 
     def _month_str(datetime_series: pd.Series) -> pd.Series:
@@ -155,7 +156,7 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
         valid = datetime_series.notna() & datetime_series.dt.year.between(
             2000, 2100, inclusive="both"
         )
-        month_str.loc[valid] = datetime_series.loc[valid].dt.strftime("%m/%Y")
+        month_str.loc[valid] = datetime_series.loc[valid].dt.strftime(date_format)
         return month_str
 
     yymmdd_prefix = raw.str.extract(r"^(\d{6})", expand=False)
@@ -235,6 +236,10 @@ def _extract_month_label(series: pd.Series) -> pd.Series:
     month_value = month_value.fillna(parsed_excel_serial)
     month_value = month_value.fillna(generic_parsed)
     return month_value
+
+
+def _extract_month_label(series: pd.Series) -> pd.Series:
+    return _extract_date_label(series, "%m/%Y")
 
 
 def _find_msp_column(df: pd.DataFrame) -> str | None:
@@ -559,32 +564,70 @@ def _render_doi_shopee_summary(
     st.dataframe(pivot_counts, width="stretch")
 
 
-def _count_keyword_matches_by_month(
+DATE_GRANULARITY_OPTIONS = {
+    "Theo tháng (MM/YYYY)": "%m/%Y",
+    "Theo ngày (DD/MM/YYYY)": "%d/%m/%Y",
+}
+
+
+def _keyword_match_mask(series: pd.Series, keyword: str, exact: bool) -> pd.Series:
+    """So khớp không phân biệt hoa thường và dấu tiếng Việt, an toàn với ký tự regex."""
+    normalized_keyword = _normalize_text(keyword)
+    values = series.fillna("").astype(str).map(_normalize_text)
+
+    if exact:
+        return values == normalized_keyword
+
+    return values.str.contains(re.escape(normalized_keyword), na=False)
+
+
+def _count_keyword_matches_by_date(
     df: pd.DataFrame,
     compare_col: str,
     time_col: str,
     keyword: str,
-) -> pd.Series:
-    """Return a Series indexed by month label ('MM/YYYY') with match counts."""
+    date_format: str,
+    exact: bool,
+) -> tuple[pd.Series, int, int]:
+    """Trả về (số lượng theo từng Date, tổng dòng khớp, số dòng khớp nhưng thiếu ngày)."""
     empty = pd.Series(dtype="int64")
 
     keyword = (keyword or "").strip()
     if not keyword or df.empty or compare_col not in df.columns or time_col not in df.columns:
-        return empty
+        return empty, 0, 0
 
-    match_mask = (
-        df[compare_col].astype(str).str.contains(keyword, case=False, na=False)
+    matched = df.loc[_keyword_match_mask(df[compare_col], keyword, exact)].copy()
+    total_matched = len(matched)
+    if total_matched == 0:
+        return empty, 0, 0
+
+    matched["__date_label__"] = _extract_date_label(matched[time_col], date_format)
+    matched = matched.dropna(subset=["__date_label__"])
+    missing_date = total_matched - len(matched)
+
+    if matched.empty:
+        return empty, total_matched, missing_date
+
+    return matched.groupby("__date_label__").size(), total_matched, missing_date
+
+
+def _sort_by_date_label(
+    frame: pd.DataFrame,
+    label_col: str,
+    date_format: str,
+) -> pd.DataFrame:
+    if date_format == "%d/%m/%Y":
+        sort_source = frame[label_col]
+    else:
+        sort_source = "01/" + frame[label_col]
+
+    sort_key = pd.to_datetime(sort_source, format="%d/%m/%Y", errors="coerce")
+    return (
+        frame.assign(__sort_key__=sort_key)
+        .sort_values("__sort_key__")
+        .drop(columns=["__sort_key__"])
+        .reset_index(drop=True)
     )
-    matched = df.loc[match_mask].copy()
-    if matched.empty:
-        return empty
-
-    matched["Date"] = _extract_month_label(matched[time_col])
-    matched = matched.dropna(subset=["Date"])
-    if matched.empty:
-        return empty
-
-    return matched.groupby("Date").size()
 
 
 def _render_dual_keyword_compare(source_df: pd.DataFrame, time_col: str) -> None:
@@ -601,55 +644,134 @@ def _render_dual_keyword_compare(source_df: pd.DataFrame, time_col: str) -> None
         help="Chọn cột chứa các giá trị bạn muốn tìm và so sánh (ví dụ: cột Lý do).",
     )
 
+    value_counts = (
+        source_df[compare_col]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .value_counts()
+    )
+    if not value_counts.empty:
+        with st.expander(f"Gợi ý giá trị đang có trong cột '{compare_col}' (top 15)"):
+            st.dataframe(
+                value_counts.head(15)
+                .rename_axis("Giá trị")
+                .reset_index(name="Số dòng"),
+                width="stretch",
+                hide_index=True,
+            )
+
     c1, c2 = st.columns(2)
     keyword_1 = c1.text_input(
-        "Từ khóa so sánh 1",
+        "Từ khóa so sánh 1 (tìm trong cột đã chọn)",
         value="",
         placeholder="Ví dụ: lỗi kỹ thuật",
         key="compare_keyword_1",
     ).strip()
     keyword_2 = c2.text_input(
-        "Từ khóa so sánh 2",
+        "Từ khóa so sánh 2 (tìm trong cột đã chọn)",
         value="",
         placeholder="Ví dụ: linh kiện",
         key="compare_keyword_2",
     ).strip()
 
+    c3, c4 = st.columns([2, 1])
+    granularity = c3.radio(
+        "Đơn vị cột Date",
+        options=list(DATE_GRANULARITY_OPTIONS.keys()),
+        horizontal=True,
+        key="compare_date_granularity",
+    )
+    exact_match = c4.checkbox(
+        "Khớp chính xác cả ô",
+        value=False,
+        key="compare_exact_match",
+        help="Bỏ chọn: tìm theo kiểu 'chứa từ khóa'. Tìm kiếm luôn bỏ qua hoa thường và dấu tiếng Việt.",
+    )
+    date_format = DATE_GRANULARITY_OPTIONS[granularity]
+
     if not keyword_1 and not keyword_2:
         st.caption("Nhập ít nhất một từ khóa để tạo bảng so sánh.")
         return
 
-    counts_1 = _count_keyword_matches_by_month(source_df, compare_col, time_col, keyword_1)
-    counts_2 = _count_keyword_matches_by_month(source_df, compare_col, time_col, keyword_2)
+    effective_time_col = time_col
+    if (
+        effective_time_col not in source_df.columns
+        or _time_parse_success_rate(source_df[effective_time_col]) == 0
+    ):
+        fallback_col = _guess_time_column(source_df)
+        if fallback_col and fallback_col != effective_time_col:
+            st.info(
+                f"Không tách được thời gian từ cột '{time_col}'. "
+                f"Đang dùng tự động cột '{fallback_col}' cho bảng so sánh."
+            )
+            effective_time_col = fallback_col
 
-    if counts_1.empty and counts_2.empty:
-        st.info(
-            "Không tìm thấy dữ liệu khớp từ khóa hoặc không tách được thời gian "
-            "từ cột đã chọn."
+    counts_1, matched_1, missing_1 = _count_keyword_matches_by_date(
+        source_df, compare_col, effective_time_col, keyword_1, date_format, exact_match
+    )
+    counts_2, matched_2, missing_2 = _count_keyword_matches_by_date(
+        source_df, compare_col, effective_time_col, keyword_2, date_format, exact_match
+    )
+
+    st.caption(
+        f"Cột so sánh: {compare_col} | Cột tách Date: {effective_time_col} | "
+        f"Phạm vi: toàn bộ sheet đang chọn ({len(source_df):,} dòng)"
+    )
+
+    m1, m2 = st.columns(2)
+    m1.metric(f"Tổng dòng khớp '{keyword_1 or '(chưa nhập)'}'", matched_1)
+    m2.metric(f"Tổng dòng khớp '{keyword_2 or '(chưa nhập)'}'", matched_2)
+
+    if matched_1 == 0 and matched_2 == 0:
+        st.warning(
+            f"Không có dòng nào trong cột '{compare_col}' khớp từ khóa đã nhập. "
+            "Hãy mở phần 'Gợi ý giá trị đang có trong cột' ở trên để nhập đúng giá trị, "
+            "hoặc bỏ chọn 'Khớp chính xác cả ô'."
         )
         return
 
-    label_1 = keyword_1 or "(trống)"
-    label_2 = keyword_2 or "(trống)"
+    if missing_1 or missing_2:
+        st.warning(
+            f"Có {missing_1 + missing_2} dòng khớp từ khóa nhưng không tách được ngày từ cột "
+            f"'{effective_time_col}' nên không được tính vào bảng. "
+            "Hãy đổi 'Cột dùng để tách Thời gian/Số lượng' nếu số này lớn."
+        )
 
-    result = pd.DataFrame(
-        {
-            label_1: counts_1,
-            label_2: counts_2,
-        }
-    ).fillna(0).astype(int)
+    if counts_1.empty and counts_2.empty:
+        st.error(
+            f"Tìm thấy {matched_1 + matched_2} dòng khớp từ khóa nhưng không tách được ngày "
+            f"từ cột '{effective_time_col}'. Hãy chọn lại 'Cột dùng để tách Thời gian/Số lượng'."
+        )
+        return
 
+    label_1 = f"SL '{keyword_1}'" if keyword_1 else "SL (chưa nhập giá trị 1)"
+    label_2 = f"SL '{keyword_2}'" if keyword_2 else "SL (chưa nhập giá trị 2)"
+    if label_2 == label_1:
+        label_2 = f"{label_2} (2)"
+
+    result = pd.DataFrame({label_1: counts_1, label_2: counts_2}).fillna(0).astype(int)
     result.index.name = "Date"
     result = result.reset_index()
-    result["_sort_date"] = pd.to_datetime(
-        "01/" + result["Date"], format="%d/%m/%Y", errors="coerce"
-    )
-    result = result.sort_values("_sort_date").drop(columns=["_sort_date"]).reset_index(drop=True)
+    result = _sort_by_date_label(result, "Date", date_format)
     result.insert(0, "STT", range(1, len(result) + 1))
 
-    st.caption(f"Cột so sánh: {compare_col}")
-    st.markdown("**Bảng so sánh: STT | Date | Giá trị 1 | Giá trị 2**")
-    st.dataframe(result, width="stretch")
+    st.markdown(f"**Bảng so sánh: STT | Date | {label_1} | {label_2}**")
+    st.dataframe(result, width="stretch", hide_index=True)
+
+    total_row = pd.DataFrame(
+        [
+            {
+                "STT": "Tổng",
+                "Date": f"{len(result)} mốc thời gian",
+                label_1: int(result[label_1].sum()),
+                label_2: int(result[label_2].sum()),
+            }
+        ]
+    )
+    st.dataframe(total_row, width="stretch", hide_index=True)
 
     chart_df = result.melt(
         id_vars=["Date"],
