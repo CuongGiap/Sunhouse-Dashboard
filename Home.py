@@ -559,40 +559,47 @@ def _render_doi_shopee_summary(
     st.dataframe(pivot_counts, width="stretch")
 
 
-def _build_keyword_subset(source_df: pd.DataFrame, keyword: str) -> pd.DataFrame:
+def _count_keyword_matches_by_month(
+    df: pd.DataFrame,
+    compare_col: str,
+    time_col: str,
+    keyword: str,
+) -> pd.Series:
+    """Return a Series indexed by month label ('MM/YYYY') with match counts."""
+    empty = pd.Series(dtype="int64")
+
     keyword = (keyword or "").strip()
-    if not keyword:
-        return source_df.iloc[0:0].copy()
+    if not keyword or df.empty or compare_col not in df.columns or time_col not in df.columns:
+        return empty
 
-    search_mask = source_df.astype(str).apply(
-        lambda col: col.str.contains(keyword, case=False, na=False)
+    match_mask = (
+        df[compare_col].astype(str).str.contains(keyword, case=False, na=False)
     )
-    return source_df[search_mask.any(axis=1)].copy()
+    matched = df.loc[match_mask].copy()
+    if matched.empty:
+        return empty
 
+    matched["Date"] = _extract_month_label(matched[time_col])
+    matched = matched.dropna(subset=["Date"])
+    if matched.empty:
+        return empty
 
-def _build_monthly_summary(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
-    if df.empty or time_col not in df.columns:
-        return pd.DataFrame(columns=["Thời gian", "Số lượng"])
-
-    summary = (
-        pd.DataFrame({"Thời gian": _extract_month_label(df[time_col])})
-        .dropna(subset=["Thời gian"])
-        .groupby("Thời gian", as_index=False)
-        .size()
-        .rename(columns={"size": "Số lượng"})
-    )
-
-    if summary.empty:
-        return summary
-
-    summary["_sort_date"] = pd.to_datetime(
-        "01/" + summary["Thời gian"], format="%d/%m/%Y", errors="coerce"
-    )
-    return summary.sort_values("_sort_date").drop(columns=["_sort_date"])
+    return matched.groupby("Date").size()
 
 
 def _render_dual_keyword_compare(source_df: pd.DataFrame, time_col: str) -> None:
-    st.subheader("So sánh 2 nhóm tìm kiếm")
+    st.subheader("So sánh 2 giá trị theo cột")
+
+    if source_df.empty or len(source_df.columns) == 0:
+        st.info("Sheet đang chọn không có dữ liệu để so sánh.")
+        return
+
+    compare_col = st.selectbox(
+        "Cột muốn so sánh",
+        options=list(source_df.columns),
+        key="compare_column",
+        help="Chọn cột chứa các giá trị bạn muốn tìm và so sánh (ví dụ: cột Lý do).",
+    )
 
     c1, c2 = st.columns(2)
     keyword_1 = c1.text_input(
@@ -612,49 +619,50 @@ def _render_dual_keyword_compare(source_df: pd.DataFrame, time_col: str) -> None
         st.caption("Nhập ít nhất một từ khóa để tạo bảng so sánh.")
         return
 
-    subset_1 = _build_keyword_subset(source_df, keyword_1)
-    subset_2 = _build_keyword_subset(source_df, keyword_2)
+    counts_1 = _count_keyword_matches_by_month(source_df, compare_col, time_col, keyword_1)
+    counts_2 = _count_keyword_matches_by_month(source_df, compare_col, time_col, keyword_2)
 
-    m1, m2 = st.columns(2)
-    m1.metric("Số dòng khớp từ khóa 1", len(subset_1))
-    m2.metric("Số dòng khớp từ khóa 2", len(subset_2))
-
-    t1, t2 = st.columns(2)
-    t1.markdown(f"**Bảng kết quả 1: {keyword_1 or '(trống)'}**")
-    t1.dataframe(subset_1, width="stretch", height=300)
-    t2.markdown(f"**Bảng kết quả 2: {keyword_2 or '(trống)'}**")
-    t2.dataframe(subset_2, width="stretch", height=300)
-
-    summary_1 = _build_monthly_summary(subset_1, time_col)
-    summary_2 = _build_monthly_summary(subset_2, time_col)
-
-    compare_parts: list[pd.DataFrame] = []
-    if not summary_1.empty and keyword_1:
-        s1 = summary_1.copy()
-        s1["Nhóm tìm kiếm"] = keyword_1
-        compare_parts.append(s1)
-
-    if not summary_2.empty and keyword_2:
-        s2 = summary_2.copy()
-        s2["Nhóm tìm kiếm"] = keyword_2
-        compare_parts.append(s2)
-
-    if not compare_parts:
+    if counts_1.empty and counts_2.empty:
         st.info(
-            "Chưa tách được dữ liệu thời gian cho 2 từ khóa theo cột thời gian đã chọn."
+            "Không tìm thấy dữ liệu khớp từ khóa hoặc không tách được thời gian "
+            "từ cột đã chọn."
         )
         return
 
-    compare_df = pd.concat(compare_parts, ignore_index=True)
+    label_1 = keyword_1 or "(trống)"
+    label_2 = keyword_2 or "(trống)"
 
-    st.markdown("**Bảng xu hướng theo tháng của 2 từ khóa**")
-    st.dataframe(compare_df, width="stretch")
+    result = pd.DataFrame(
+        {
+            label_1: counts_1,
+            label_2: counts_2,
+        }
+    ).fillna(0).astype(int)
+
+    result.index.name = "Date"
+    result = result.reset_index()
+    result["_sort_date"] = pd.to_datetime(
+        "01/" + result["Date"], format="%d/%m/%Y", errors="coerce"
+    )
+    result = result.sort_values("_sort_date").drop(columns=["_sort_date"]).reset_index(drop=True)
+    result.insert(0, "STT", range(1, len(result) + 1))
+
+    st.caption(f"Cột so sánh: {compare_col}")
+    st.markdown("**Bảng so sánh: STT | Date | Giá trị 1 | Giá trị 2**")
+    st.dataframe(result, width="stretch")
+
+    chart_df = result.melt(
+        id_vars=["Date"],
+        value_vars=[label_1, label_2],
+        var_name="Từ khóa",
+        value_name="Số lượng",
+    )
 
     trend_chart = px.line(
-        compare_df,
-        x="Thời gian",
+        chart_df,
+        x="Date",
         y="Số lượng",
-        color="Nhóm tìm kiếm",
+        color="Từ khóa",
         markers=True,
         title="So sánh xu hướng số lượng theo 2 từ khóa",
     )
