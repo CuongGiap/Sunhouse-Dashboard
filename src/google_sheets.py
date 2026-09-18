@@ -97,13 +97,38 @@ def load_service_account_credentials(
     )
 
 
+def _make_unique_headers(raw_headers: list[Any]) -> list[str]:
+    """Tên cột phải duy nhất và không rỗng.
+
+    Google Sheet hay có header gộp, header trống hoặc hai cột cùng tên. Nếu để
+    nguyên, ``df[ten_cot]`` trả về DataFrame thay vì Series và mọi xử lý theo cột
+    sẽ hỏng (AttributeError: 'DataFrame' object has no attribute 'str').
+    """
+    used: set[str] = set()
+    headers: list[str] = []
+
+    for index, value in enumerate(raw_headers):
+        name = str(value).strip() if value is not None else ""
+        if not name:
+            name = f"col_{index + 1}"
+
+        candidate = name
+        suffix = 2
+        while candidate in used:
+            candidate = f"{name} ({suffix})"
+            suffix += 1
+
+        used.add(candidate)
+        headers.append(candidate)
+
+    return headers
+
+
 def _values_to_dataframe(values: list[list[Any]]) -> pd.DataFrame:
     if not values:
         return pd.DataFrame()
 
-    headers = [str(c).strip() if c is not None else "" for c in values[0]]
-    if not any(headers):
-        headers = [f"col_{i+1}" for i in range(len(values[0]))]
+    headers = list(values[0])
 
     rows = values[1:] if len(values) > 1 else []
     max_row_len = max((len(row) for row in rows), default=0)
@@ -113,6 +138,8 @@ def _values_to_dataframe(values: list[list[Any]]) -> pd.DataFrame:
     # so every row can be normalized to the same width.
     if len(headers) < target_len:
         headers = headers + [f"col_{i+1}" for i in range(len(headers), target_len)]
+
+    headers = _make_unique_headers(headers)
 
     normalized_rows: list[list[Any]] = []
     for row in rows:

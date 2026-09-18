@@ -136,6 +136,20 @@ App production: https://sunhouse-dashboard.streamlit.app/
     - Còn tồn (chưa làm, theo thống nhất): rate limit/log truy cập, phân quyền theo người
       dùng thật thay cho 1 mã dùng chung, pin version dependency.
 
+26. (chưa commit) Fix `AttributeError` khi mở báo cáo có cột trùng tên
+    - **Sự cố production**: mở "Báo Cáo Chỉ Số Vận Hành" là app crash
+      `AttributeError: 'DataFrame' object has no attribute 'str'` tại `_extract_date_label`.
+    - **Nguyên nhân**: sheet có 2 cột cùng tên (và/hoặc ô header trống). `_values_to_dataframe`
+      chỉ đổi tên khi *toàn bộ* header rỗng, nên tên cột bị trùng. Với nhãn trùng,
+      `df[col]` trả về **DataFrame** thay vì Series → `.str` không tồn tại.
+    - Fix tận gốc: thêm `_make_unique_headers` trong `src/google_sheets.py`, chuẩn hoá ngay
+      khi đọc dữ liệu - header rỗng thành `col_N`, header trùng thành `Tên (2)`, `Tên (3)`.
+      Sheet có header hợp lệ giữ nguyên tên như cũ.
+    - Thêm lưới an toàn trong `_extract_date_label`: nếu vẫn nhận DataFrame thì lấy cột đầu,
+      để một sheet lạ không làm chết cả app.
+    - Bọc `render_dashboard` trong try/except + `logger.exception`, thống nhất với mục 4 của
+      đợt rà soát bảo mật: lỗi hiển thị cũng không đổ traceback ra cho người dùng.
+
 ## Các sự cố production đã xử lý (tổng hợp riêng để tra nhanh)
 
 | Sự cố | Nguyên nhân | Cách fix | Commit |
@@ -146,6 +160,7 @@ App production: https://sunhouse-dashboard.streamlit.app/
 | App crash `OverflowError` khi vào tab có cột số lớn | Convert số bất kỳ thành ngày kiểu Excel serial không giới hạn khoảng | Giới hạn giá trị hợp lệ trước khi convert | `fa86b24` |
 | App vẫn lỗi khi `fillna` giữa nhiều cột datetime64 | Các `Series` datetime khác đơn vị thời gian (unit) gây overflow khi gộp | Đổi pipeline sang gộp chuỗi `"MM/YYYY"` thay vì gộp datetime | `79e6660` |
 | Tính năng so sánh 2 từ khóa chưa đúng yêu cầu | Version đầu tìm toàn bảng, ra 2 bảng riêng thay vì 1 bảng 4 cột theo đúng 1 cột chỉ định | Viết lại `_render_dual_keyword_compare` theo đúng đặc tả STT/Date/giá trị 1/giá trị 2 | `047f203` |
+| Mở báo cáo mới là crash `AttributeError: 'DataFrame' object has no attribute 'str'` | Sheet có cột trùng tên → `df[col]` trả về DataFrame thay vì Series | `_make_unique_headers` chuẩn hoá tên cột ngay khi đọc dữ liệu | (chưa commit) |
 | Xác thực fail-open: thiếu `APP_ACCESS_TOKEN` là app mở công khai | Code cũ gán `auth_ok = True` khi không có token cấu hình | Fail-closed: hiện lỗi, ghi log, `st.stop()` | (chưa commit) |
 | `.gitignore` không chặn `.streamlit/secrets.toml` và `service-account.json` | Dòng `!.streamlit/` vô hiệu hoá ignore cả thư mục; thiếu hẳn `service-account.json` | Đổi sang `.streamlit/*` + negation file mẫu, bổ sung `service-account.json` | (chưa commit) |
 | Bảng so sánh không hiển thị giá trị nào | Không bỏ dấu tiếng Việt khi so khớp; từ khóa bị hiểu là regex; dòng khớp bị loại vì không tách được ngày | Chuẩn hoá `_normalize_text` + `re.escape`, fallback cột thời gian, hiển thị số dòng khớp và số dòng thiếu ngày | (chưa commit) |

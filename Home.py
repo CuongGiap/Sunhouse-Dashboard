@@ -186,6 +186,11 @@ def _find_reason_column(df: pd.DataFrame) -> str | None:
 
 def _extract_date_label(series: pd.Series, date_format: str = "%m/%Y") -> pd.Series:
     """Nhận diện nhiều định dạng ngày rồi format theo `date_format` (mặc định MM/YYYY)."""
+    # Lưới an toàn: cột trùng tên làm df[col] trả về DataFrame thay vì Series.
+    # Nguồn dữ liệu đã chuẩn hoá tên cột, đây chỉ để app không chết nếu vẫn lọt.
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
+
     raw = series.fillna("").astype(str).str.strip()
 
     def _month_str(datetime_series: pd.Series) -> pd.Series:
@@ -983,7 +988,14 @@ if load_button or refresh_button:
         )
 
 if st.session_state.tabs_data and st.session_state.spreadsheet_id:
-    render_dashboard(st.session_state.tabs_data, st.session_state.spreadsheet_id)
+    try:
+        render_dashboard(st.session_state.tabs_data, st.session_state.spreadsheet_id)
+    except Exception:
+        logger.exception("Lỗi khi hiển thị dashboard")
+        st.error(
+            "Đã xảy ra lỗi khi hiển thị dữ liệu của báo cáo này. "
+            "Vui lòng thử 'Tải lại (bỏ cache)' hoặc liên hệ quản trị viên."
+        )
 else:
     st.info(
         "Nhấn **Kết nối và tải dữ liệu** để bắt đầu. "
