@@ -559,6 +559,108 @@ def _render_doi_shopee_summary(
     st.dataframe(pivot_counts, width="stretch")
 
 
+def _build_keyword_subset(source_df: pd.DataFrame, keyword: str) -> pd.DataFrame:
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return source_df.iloc[0:0].copy()
+
+    search_mask = source_df.astype(str).apply(
+        lambda col: col.str.contains(keyword, case=False, na=False)
+    )
+    return source_df[search_mask.any(axis=1)].copy()
+
+
+def _build_monthly_summary(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
+    if df.empty or time_col not in df.columns:
+        return pd.DataFrame(columns=["Thời gian", "Số lượng"])
+
+    summary = (
+        pd.DataFrame({"Thời gian": _extract_month_label(df[time_col])})
+        .dropna(subset=["Thời gian"])
+        .groupby("Thời gian", as_index=False)
+        .size()
+        .rename(columns={"size": "Số lượng"})
+    )
+
+    if summary.empty:
+        return summary
+
+    summary["_sort_date"] = pd.to_datetime(
+        "01/" + summary["Thời gian"], format="%d/%m/%Y", errors="coerce"
+    )
+    return summary.sort_values("_sort_date").drop(columns=["_sort_date"])
+
+
+def _render_dual_keyword_compare(source_df: pd.DataFrame, time_col: str) -> None:
+    st.subheader("So sánh 2 nhóm tìm kiếm")
+
+    c1, c2 = st.columns(2)
+    keyword_1 = c1.text_input(
+        "Từ khóa so sánh 1",
+        value="",
+        placeholder="Ví dụ: lỗi kỹ thuật",
+        key="compare_keyword_1",
+    ).strip()
+    keyword_2 = c2.text_input(
+        "Từ khóa so sánh 2",
+        value="",
+        placeholder="Ví dụ: linh kiện",
+        key="compare_keyword_2",
+    ).strip()
+
+    if not keyword_1 and not keyword_2:
+        st.caption("Nhập ít nhất một từ khóa để tạo bảng so sánh.")
+        return
+
+    subset_1 = _build_keyword_subset(source_df, keyword_1)
+    subset_2 = _build_keyword_subset(source_df, keyword_2)
+
+    m1, m2 = st.columns(2)
+    m1.metric("Số dòng khớp từ khóa 1", len(subset_1))
+    m2.metric("Số dòng khớp từ khóa 2", len(subset_2))
+
+    t1, t2 = st.columns(2)
+    t1.markdown(f"**Bảng kết quả 1: {keyword_1 or '(trống)'}**")
+    t1.dataframe(subset_1, width="stretch", height=300)
+    t2.markdown(f"**Bảng kết quả 2: {keyword_2 or '(trống)'}**")
+    t2.dataframe(subset_2, width="stretch", height=300)
+
+    summary_1 = _build_monthly_summary(subset_1, time_col)
+    summary_2 = _build_monthly_summary(subset_2, time_col)
+
+    compare_parts: list[pd.DataFrame] = []
+    if not summary_1.empty and keyword_1:
+        s1 = summary_1.copy()
+        s1["Nhóm tìm kiếm"] = keyword_1
+        compare_parts.append(s1)
+
+    if not summary_2.empty and keyword_2:
+        s2 = summary_2.copy()
+        s2["Nhóm tìm kiếm"] = keyword_2
+        compare_parts.append(s2)
+
+    if not compare_parts:
+        st.info(
+            "Chưa tách được dữ liệu thời gian cho 2 từ khóa theo cột thời gian đã chọn."
+        )
+        return
+
+    compare_df = pd.concat(compare_parts, ignore_index=True)
+
+    st.markdown("**Bảng xu hướng theo tháng của 2 từ khóa**")
+    st.dataframe(compare_df, width="stretch")
+
+    trend_chart = px.line(
+        compare_df,
+        x="Thời gian",
+        y="Số lượng",
+        color="Nhóm tìm kiếm",
+        markers=True,
+        title="So sánh xu hướng số lượng theo 2 từ khóa",
+    )
+    st.plotly_chart(trend_chart, width="stretch")
+
+
 def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) -> None:
     total_tabs = len(tabs_data)
     total_rows = sum(len(df) for df in tabs_data.values())
@@ -649,6 +751,7 @@ def render_dashboard(tabs_data: dict[str, pd.DataFrame], spreadsheet_id: str) ->
         )
 
     _render_doi_shopee_summary(selected_df, selected_sheet, selected_time_col)
+    _render_dual_keyword_compare(selected_df, selected_time_col)
 
 
 col_load, col_refresh = st.columns([2, 1])
